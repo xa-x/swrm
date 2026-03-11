@@ -3,15 +3,25 @@
   "version": "1.0.0",
   "private": true,
   "workspaces": [
-    "app"
+    "apps/*",
+    "packages/*",
+    "convex"
   ],
   "scripts": {
-    "dev": "npx convex dev",
+    "dev": "npm run dev:native",
+    "dev:native": "npm run dev -w @swrm/native",
+    "dev:web": "npm run dev -w @swrm/web",
+    "dev:convex": "npx convex dev",
+    "build": "npm run build -w @swrm/shared",
     "deploy": "npx convex deploy",
-    "app": "cd app && npx expo start",
-    "setup": "chmod +x setup.sh && ./setup.sh"
+    "lint": "npm run lint -w @swrm/shared -w @swrm/native -w @swrm/web",
+    "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules && npm install"
   },
   "devDependencies": {
-    "convex": "^1.23.0"
+    "convex": "^1.23.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
