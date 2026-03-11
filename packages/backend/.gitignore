@@ -1,0 +1,12 @@
+# Convex generated files
+convex/_generated/
+
+# Environment
+.env
+.env.local
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log

@@ -16,7 +16,6 @@ export const secureStorage = {
   },
 
   async getAllApiKeys(): Promise<Record<string, string>> {
-    // SecureStore doesn't support listing, so we track providers separately
     const providers = await AsyncStorage.getItem('api_key_providers');
     const providerList: string[] = providers ? JSON.parse(providers) : [];
     
@@ -63,15 +62,6 @@ export const userPrefs = {
 
   async getUserId(): Promise<string | null> {
     return AsyncStorage.getItem('user_id');
-  },
-
-  async setHasAgents(value: boolean) {
-    await AsyncStorage.setItem('has_agents', JSON.stringify(value));
-  },
-
-  async hasAgents(): Promise<boolean> {
-    const value = await AsyncStorage.getItem('has_agents');
-    return value === 'true';
   },
 
   async setOnboardingComplete(value: boolean) {

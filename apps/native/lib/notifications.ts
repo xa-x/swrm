@@ -1,8 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
-import * as Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { api } from './api';
+import Constants from 'expo-constants';
 
 // Configure notification handling
 Notifications.setNotificationHandler({
@@ -39,16 +38,18 @@ export async function registerForPushNotifications(userId: string): Promise<stri
       return null;
     }
 
-    token = (await Notifications.getExpoPushTokenAsync({
-      projectId: Constants.expoConfig?.extra?.eas?.projectId,
-    })).data;
-
-    // Register with backend
     try {
-      await api.registerPushToken(token, Device.modelName || undefined);
-      console.log('Push token registered:', token);
+      const pushToken = await Notifications.getExpoPushTokenAsync({
+        projectId: Constants.expoConfig?.extra?.eas?.projectId,
+      });
+      token = pushToken.data;
+
+      // Register with Convex (TODO: create push mutation)
+      // For now, just log it
+      console.log('Push token:', token);
+      
     } catch (err) {
-      console.error('Failed to register push token:', err);
+      console.error('Failed to get push token:', err);
     }
   } else {
     console.log('Push notifications require a physical device');

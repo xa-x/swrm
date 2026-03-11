@@ -3,12 +3,16 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View } from 'react-native';
+import { View, ActivityIndicator } from 'react-native';
 import { ClerkProvider, useAuth } from '@clerk/clerk-expo';
 import * as SecureStore from 'expo-secure-store';
-import { api } from '../lib/api';
+import { ConvexProvider, ConvexReactClient, useQuery } from 'convex/react';
 import { initDatabase } from '../lib/db';
 import { registerForPushNotifications } from '../lib/notifications';
+
+// Convex client
+const CONVEX_URL = process.env.EXPO_PUBLIC_CONVEX_URL;
+const convex = CONVEX_URL ? new ConvexReactClient(CONVEX_URL) : null;
 
 // Clerk token cache
 const tokenCache = {
@@ -33,12 +37,9 @@ SplashScreen.preventAutoHideAsync();
 const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_KEY || '';
 
 export default function RootLayout() {
-  const [appReady, setAppReady] = useState(false);
   const [dbReady, setDbReady] = useState(false);
 
-  const [fontsLoaded] = useFonts({
-    // Load system fonts for markdown
-  });
+  const [fontsLoaded] = useFonts({});
 
   useEffect(() => {
     async function prepare() {
@@ -47,7 +48,7 @@ export default function RootLayout() {
         setDbReady(true);
       } catch (e) {
         console.warn('DB init failed:', e);
-        setDbReady(true); // Continue anyway
+        setDbReady(true);
       }
     }
     prepare();
@@ -56,7 +57,6 @@ export default function RootLayout() {
   const onLayoutRootView = useCallback(async () => {
     if (fontsLoaded && dbReady) {
       await SplashScreen.hideAsync();
-      setAppReady(true);
     }
   }, [fontsLoaded, dbReady]);
 
@@ -64,38 +64,43 @@ export default function RootLayout() {
     return null;
   }
 
-  return (
-    <ClerkProvider
-      publishableKey={CLERK_PUBLISHABLE_KEY}
-      tokenCache={tokenCache}
-    >
-      <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
+  if (!convex) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
         <StatusBar style="auto" />
-        <RootNavigator />
       </View>
-    </ClerkProvider>
+    );
+  }
+
+  return (
+    <ConvexProvider client={convex}>
+      <ClerkProvider
+        publishableKey={CLERK_PUBLISHABLE_KEY}
+        tokenCache={tokenCache}
+      >
+        <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
+          <StatusBar style="auto" />
+          <RootNavigator />
+        </View>
+      </ClerkProvider>
+    </ConvexProvider>
   );
 }
 
 function RootNavigator() {
   const { isSignedIn, isLoaded, userId } = useAuth();
-  const [hasAgents, setHasAgents] = useState<boolean | null>(null);
+
+  // TODO: Use Convex query once api is generated
+  // const agents = useQuery(api.agents.list, userId ? { userId } : "skip");
 
   useEffect(() => {
     if (isSignedIn && userId) {
-      // Register for push notifications
       registerForPushNotifications(userId);
-      // Load API token
-      api.loadToken();
-      // Check if user has agents
-      api.getAgents().then(({ agents }) => {
-        setHasAgents(agents.length > 0);
-      }).catch(() => setHasAgents(false));
     }
   }, [isSignedIn, userId]);
 
   if (!isLoaded) {
-    return null; // Loading state
+    return null;
   }
 
   // Not signed in → Auth flow
@@ -107,16 +112,8 @@ function RootNavigator() {
     );
   }
 
-  // Signed in but no agents → Setup wizard
-  if (hasAgents === false) {
-    return (
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(setup)" />
-      </Stack>
-    );
-  }
-
-  // Signed in with agents → Main app
+  // For now, skip setup check and go to main app
+  // TODO: Add agent count check once Convex is connected
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(app)" />
