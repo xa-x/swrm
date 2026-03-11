@@ -1,0 +1,17 @@
+{
+  "name": "swrm",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "app"
+  ],
+  "scripts": {
+    "dev": "npx convex dev",
+    "deploy": "npx convex deploy",
+    "app": "cd app && npx expo start",
+    "setup": "chmod +x setup.sh && ./setup.sh"
+  },
+  "devDependencies": {
+    "convex": "^1.23.0"
+  }
+}

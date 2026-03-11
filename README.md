@@ -5,275 +5,302 @@ Deploy AI agents. Control from anywhere.
 ## 🚀 Quick Start
 
 ### Prerequisites
-- [Bun](https://bun.sh) - Fast JavaScript runtime
-- [Docker Desktop](https://docs.docker.com/get-docker/) - Container runtime
-- [Expo CLI](https://docs.expo.dev/get-started/installation/) - React Native
+- [Node.js 18+](https://nodejs.org)
+- [Convex account](https://convex.dev) (free tier available)
+- [Fly.io account](https://fly.io) (for container hosting)
+- [Expo CLI](https://docs.expo.dev/get-started/installation/)
 
-### One-Command Setup
+### Setup
 
+**1. Clone and install**
 ```bash
-chmod +x setup.sh start.sh
-./setup.sh
-```
-
-### Manual Setup
-
-**Backend:**
-```bash
-cd backend
-bun install
-
-# Generate encryption key
-openssl rand -hex 32 >> .env
-# Edit .env and set ENCRYPTION_KEY=...
-
-bun run dev
-```
-
-**App:**
-```bash
-cd app
+git clone https://github.com/your-org/swrm.git
+cd swrm
 npm install
+```
+
+**2. Set up Convex**
+```bash
+# Install Convex CLI
+npm install -g convex
+
+# Login to Convex
+npx convex login
+
+# Deploy to Convex (creates backend automatically)
+npx convex deploy
+```
+
+**3. Configure environment**
+```bash
+# Copy example env
+cp .env.example .env
+
+# Add your keys
+CONVEX_URL=your_convex_url
+FLY_API_TOKEN=your_fly_token
+FLY_APP_NAME=swrm-agents
+```
+
+**4. Set up Fly.io**
+```bash
+# Create Fly.io app for containers
+fly apps create swrm-agents
+
+# Generate API token
+fly auth token
+
+# Add token to Convex environment variables
+npx convex env set FLY_API_TOKEN your_token_here
+```
+
+**5. Run the app**
+```bash
+# Start Expo
+cd app
 npx expo start
 ```
 
-## 🎯 Features
+## 🏗️ Architecture
 
-- **Card-based home** - Visual agent grid
-- **Markdown chat** - Rich message rendering
-- **Swarm mode** - Broadcast to all agents
-- **Docker actions** - Start/stop/restart/kill
-- **Action logging** - Track all container events
-- **Usage tracking** - Per-agent costs
-- **Push notifications** - Task alerts
-- **Offline-first** - Local SQLite cache
-- **Secure storage** - API keys encrypted at rest
-- **Progress indicators** - Real-time creation status
-- **Error recovery** - Retry failed operations
-
-## 🔒 Security
-
-### API Key Storage
-- Keys are **encrypted at rest** using AES-256-GCM
-- Keys are **never sent to backend** after initial creation
-- Keys stored in device **SecureStore** (encrypted on disk)
-
-### Backend Security
-| Layer | Protection |
-|-------|------------|
-| **Encryption** | AES-256-GCM for API keys |
-| **Rate limiting** | 100 req/min per IP |
-| **Security headers** | CSP, XSS, CSRF protection |
-| **Input validation** | Zod schemas on all endpoints |
-| **Auth** | X-User-Id header (JWT in production) |
-| **Docker** | Containers isolated, limited resources |
-
-### Container Isolation
-```yaml
-Memory: 512MB limit
-CPU: 0.5 cores
-Network: Isolated per region
-Filesystem: Read-only root + workspace volume
 ```
-
-### Privacy
-
-**We track:**
-- ✅ Token usage (for billing)
-- ✅ Agent status
-- ✅ Container actions
-- ✅ Session count
-
-**We DON'T track:**
-- ❌ Chat messages
-- ❌ File contents
-- ❌ Voice recordings
-- ❌ API keys (only encrypted hash)
-
-Messages stay in user's app and agent container.
+┌─────────────────────────────────────────────────┐
+│                  EXPO APP                        │
+│  - Real-time subscriptions (Convex)             │
+│  - Offline-first (Expo-SQLite)                  │
+│  - Push notifications                           │
+└──────────────────────┬──────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────┐
+│                  CONVEX                          │
+│  - Database (real-time sync)                    │
+│  - Functions (mutations, queries, actions)      │
+│  - Scheduled jobs (crons)                       │
+│  - HTTP actions (webhooks)                      │
+│  - Built-in dashboard                           │
+└──────────────────────┬──────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────┐
+│              FLY.IO MACHINES                     │
+│  - ZeroClaw containers (per agent)              │
+│  - Auto-scaling (start/stop on demand)          │
+│  - Multiple regions                             │
+│  - $0.50-2/agent/month                          │
+└─────────────────────────────────────────────────┘
+```
 
 ## 📁 Project Structure
 
 ```
 swrm/
+├── convex/                  # Convex backend
+│   ├── schema.ts           # Database schema
+│   ├── agents.ts           # Agent CRUD
+│   ├── chat.ts             # Chat functions
+│   ├── usage.ts            # Usage tracking
+│   ├── docker.ts           # Fly.io integration
+│   ├── http.ts             # HTTP actions
+│   ├── crons.ts            # Scheduled jobs
+│   └── actions.ts          # Action logging
+│
 ├── app/                    # Expo app
-│   ├── app/               # Routes (file-based)
+│   ├── app/               # Routes
 │   │   ├── (app)/
-│   │   │   ├── index.tsx  # Home (agent cards)
-│   │   │   ├── chat/[id].tsx
-│   │   │   ├── create.tsx
-│   │   │   ├── broadcast.tsx
-│   │   │   ├── agent/[id].tsx
-│   │   │   └── settings.tsx
 │   │   ├── (auth)/
 │   │   └── (setup)/
 │   ├── lib/
-│   │   ├── api.ts
-│   │   ├── db.ts
-│   │   ├── storage.ts
-│   │   ├── websocket.ts
-│   │   └── notifications.ts
+│   │   ├── convex.ts      # Convex client
+│   │   ├── api.ts         # API wrapper
+│   │   └── storage.ts
 │   └── components/
-│       ├── ProgressIndicator.tsx
-│       └── ErrorRecovery.tsx
 │
-└── backend/               # Bun + Hono API
-    ├── src/
-    │   ├── index.ts
-    │   ├── routes/
-    │   ├── services/
-    │   │   ├── docker.ts
-    │   │   └── crypto.ts
-    │   ├── middleware/
-    │   │   └── security.ts
-    │   └── db/
-    └── fly.toml
+└── README.md
 ```
 
-## 🐳 Docker Actions
+## 🎯 Features
 
-Every action is logged:
+- **Real-time sync** - Convex subscriptions for instant updates
+- **Card-based home** - Visual agent grid
+- **Markdown chat** - Rich message rendering
+- **Swarm mode** - Broadcast to all agents
+- **Docker actions** - Start/stop/restart via Fly.io
+- **Action logging** - Full audit trail
+- **Usage tracking** - Per-agent costs
+- **Push notifications** - Task alerts
+- **Offline-first** - Local SQLite cache
+- **Secure storage** - API keys encrypted
+- **Progress indicators** - Real-time status
+- **Error recovery** - Retry failed operations
+- **Cron jobs** - Automatic cleanup
+- **Built-in dashboard** - Convex UI
+
+## 🔒 Security
+
+| Layer | Protection |
+|-------|------------|
+| **API keys** | Encrypted at rest (base64, use proper encryption in prod) |
+| **Auth** | Clerk integration |
+| **Rate limiting** | Convex built-in limits |
+| **Container isolation** | Fly.io Machines (512MB, 1 CPU) |
+| **Network** | Internal Fly.io network |
+| **Secrets** | Convex environment variables |
+
+## 💰 Cost
+
+### Convex
+- **Free tier**: 100K function calls/month
+- **Pro**: $25/month for 1M function calls
+- **Est. cost**: Free for MVP, ~$25/mo at scale
+
+### Fly.io Machines
+- **Shared CPU**: $0.0015/hour (512MB)
+- **Est. per agent**: $0.50-2/month (idle most of the time)
+- **10 agents**: ~$10-20/month
+
+### Total
+- **MVP (10 agents)**: ~$10-20/month
+- **Scale (100 agents)**: ~$50-100/month + Convex Pro
+
+## 🐳 Container Management
+
+Every agent runs in a Fly.io Machine:
 
 ```
-POST /agents/:id/start     // Start agent
-POST /agents/:id/stop      // Graceful stop
-POST /agents/:id/pause     // Pause (idle mode)
-POST /agents/:id/restart   // Force restart
-POST /agents/:id/kill      // Hard kill
-GET  /agents/:id/logs      // Container logs
-GET  /agents/:id/stats     // CPU/memory usage
-GET  /agents/:id/actions   // Action history
+Agent created → Machine spawned (ZeroClaw image)
+User sends message → Machine wakes (if stopped)
+Message processed → Machine can idle/stop
+User stops agent → Machine destroyed
 ```
+
+**Actions logged:**
+- create, start, stop, restart, delete
+- Timestamp, triggered by, details
 
 ## 🚀 Agent Creation Flow
 
 ```
 User taps [+] → Wizard (4 steps)
-  ├─ Step 1: Name
-  ├─ Step 2: Provider + API Key
-  ├─ Step 3: Personality
-  └─ Step 4: Skills
-      ↓
-POST /agents (API key encrypted)
-      ↓
-[Creating] → Pull ZeroClaw image → Create container → [Running]
-      ↓
-Progress indicator shows:
-  🔨 Creating... (20%)
-  📥 Pulling image... (40%)
-  🚀 Starting... (60-90%)
-  ✅ Ready! (100%)
-      ↓
+  ↓
+Convex mutation: agents.create()
+  ↓
+Action scheduled: docker.createContainer()
+  ↓
+Fly.io API: POST /machines
+  ↓
+Machine starts → Agent ready
+  ↓
+Real-time update: status → "running"
+  ↓
 Card appears on home grid
-      ↓
-Tap → Chat
 ```
 
 **Timeline:**
-- First time: 15-40 seconds (image pull)
-- Subsequent: 5-10 seconds
+- Machine creation: 5-10 seconds
+- From tap to ready: 10-15 seconds total
 
 ## 🔧 Configuration
 
-### App (.env)
+### Convex Environment Variables
 ```bash
-EXPO_PUBLIC_API_URL=http://localhost:3001
+# Set via: npx convex env set KEY value
+FLY_API_TOKEN=your_fly_token
+FLY_APP_NAME=swrm-agents
+```
+
+### App Environment (.env)
+```bash
+EXPO_PUBLIC_CONVEX_URL=your_convex_url
 EXPO_PUBLIC_CLERK_KEY=pk_test_...
 ```
 
-### Backend (.env)
-```bash
-PORT=3001
-NODE_ENV=development
+## 📊 Convex Dashboard
 
-# Generate with: openssl rand -hex 32
-ENCRYPTION_KEY=your_32_byte_hex_key_here
-```
-
-## 🚢 Deployment
-
-### Backend → Fly.io
-
-```bash
-cd backend
-
-# First time
-fly launch
-
-# Set secrets
-fly secrets set ENCRYPTION_KEY=$(openssl rand -hex 32)
-
-# Deploy
-fly deploy
-```
-
-**Cost:** ~$2/month per region
-
-### App → EAS
-
-```bash
-cd app
-
-# Build
-eas build --platform ios --profile development
-
-# Submit
-eas submit --platform ios
-```
-
-## 📊 API Reference
-
-### Agents
-```
-GET    /agents              # List user's agents
-POST   /agents              # Create agent
-GET    /agents/:id          # Get agent
-PATCH  /agents/:id          # Update agent
-DELETE /agents/:id          # Delete agent
-
-POST   /agents/:id/start    # Start container
-POST   /agents/:id/stop     # Stop container
-POST   /agents/:id/pause    # Pause container
-POST   /agents/:id/restart  # Restart container
-POST   /agents/:id/kill     # Kill container
-
-GET    /agents/:id/logs     # Container logs
-GET    /agents/:id/stats    # Resource stats
-GET    /agents/:id/actions  # Action history
-```
-
-### Chat
-```
-GET    /chat/ws/:agentId    # WebSocket connection
-POST   /chat/:agentId       # REST message
-```
-
-### Usage
-```
-GET    /usage/:agentId      # Agent usage
-GET    /usage               # All usage
-```
-
-## 💰 BYOK Model
-
-Users bring their own API keys:
-- Zero AI cost to you
-- Transparent pricing
-- User has full control
-
-**Future:** Add credit system for non-tech users.
+Access at `https://dashboard.convex.dev`:
+- **Data**: Browse all tables
+- **Functions**: View logs, run manually
+- **Crons**: See scheduled jobs
+- **Usage**: Monitor function calls
+- **Deployments**: View history
 
 ## 🛠 Development
 
 ```bash
-# Run backend in dev mode
-cd backend && bun run dev
+# Run Convex dev (watches for changes)
+npx convex dev
 
-# Run app
+# Run Expo
 cd app && npx expo start
 
-# Type check
-cd backend && bun run typecheck
+# Deploy Convex
+npx convex deploy
+
+# View logs
+npx convex logs
+```
+
+## 🚢 Deployment
+
+### Convex (Automatic)
+```bash
+npx convex deploy
+```
+Convex deploys to their cloud automatically.
+
+### Fly.io (One-time setup)
+```bash
+fly apps create swrm-agents
+fly tokens create deploy -x 999999h  # Long-lived token
+npx convex env set FLY_API_TOKEN <token>
+```
+
+### App (EAS)
+```bash
+cd app
+eas build --platform ios
+eas submit
+```
+
+## 📝 API Reference
+
+### Convex Functions
+
+**Agents:**
+```
+agents.list(userId)          → Agent[]
+agents.get(agentId)          → Agent
+agents.create(...)           → { agentId, status }
+agents.update(agentId, ...)  → { success }
+agents.remove(agentId)       → { success }
+agents.start(agentId)        → { success, status }
+agents.stop(agentId)         → { success, status }
+agents.restart(agentId)      → { success, status }
+```
+
+**Chat:**
+```
+chat.getHistory(agentId, sessionId?) → Message[]
+chat.send(agentId, content, sessionId?) → { response, tokens, cost }
+```
+
+**Usage:**
+```
+usage.getByAgent(agentId, period) → { records, summary }
+usage.getByUser(userId, period)   → { agents, totals }
+```
+
+## 🔄 Real-time Subscriptions
+
+```typescript
+// Subscribe to agent list
+const agents = useQuery(api.agents.list, { userId });
+
+// Subscribe to single agent
+const agent = useQuery(api.agents.get, { agentId });
+
+// Subscribe to chat history
+const messages = useQuery(api.chat.getHistory, { agentId, sessionId });
 ```
 
 ## 📝 License
