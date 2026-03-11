@@ -1,60 +1,59 @@
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useEffect, useCallback, useState } from 'react';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '@clerk/clerk-expo';
+import { useAgents } from '../../lib/hooks';
 import { agentsDb, LocalAgent, AgentStatus } from '../../lib/db';
-import { api } from '../../lib/api';
 
 export default function HomeScreen() {
-  const [agents, setAgents] = useState<LocalAgent[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { userId } = useAuth();
+  const [localAgents, setLocalAgents] = useState<LocalAgent[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadAgents = useCallback(async () => {
-    try {
-      // Try local DB first
-      const localAgents = await agentsDb.getAll();
-      
-      // Sync with server
-      const { agents: serverAgents } = await api.getAgents();
-      
-      // Merge and update local
-      for (const agent of serverAgents) {
-        await agentsDb.upsert({
-          id: agent.id,
-          name: agent.name,
-          provider: agent.provider,
-          model: agent.model,
-          personality: agent.personality,
-          skills: agent.skills,
-          status: agent.status,
-          budgetLimit: agent.budgetLimit,
-          lastActive: agent.updatedAt,
-        });
-      }
+  // Real-time subscription to agents
+  const agents = useAgents(userId);
 
-      const updated = await agentsDb.getAll();
-      setAgents(updated);
-    } catch (err) {
-      console.error('Failed to load agents:', err);
-      // Show local data anyway
-      const localAgents = await agentsDb.getAll();
-      setAgents(localAgents);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+  // Load local cache
+  useEffect(() => {
+    loadLocalAgents();
   }, []);
 
+  // Sync Convex data to local DB
   useEffect(() => {
-    loadAgents();
-  }, [loadAgents]);
+    if (agents) {
+      syncToLocal(agents);
+    }
+  }, [agents]);
+
+  const loadLocalAgents = async () => {
+    const local = await agentsDb.getAll();
+    setLocalAgents(local);
+  };
+
+  const syncToLocal = async (serverAgents: any[]) => {
+    for (const agent of serverAgents) {
+      await agentsDb.upsert({
+        id: agent._id,
+        name: agent.name,
+        icon: agent.icon,
+        provider: agent.provider,
+        model: agent.model,
+        personality: agent.personality,
+        skills: agent.skills,
+        status: agent.status,
+        region: agent.region,
+      });
+    }
+    loadLocalAgents();
+  };
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    loadAgents();
-  }, [loadAgents]);
+    // Convex automatically refreshes, just update local
+    loadLocalAgents().then(() => setRefreshing(false));
+  }, []);
 
   const openChat = (agentId: string) => {
     router.push(`/chat/${agentId}`);
@@ -63,6 +62,20 @@ export default function HomeScreen() {
   const createAgent = () => {
     router.push('/create');
   };
+
+  // Loading state
+  if (agents === undefined && localAgents.length === 0) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loading}>
+          <ActivityIndicator size="large" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Use server data if available, else local cache
+  const displayAgents = agents || localAgents;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -86,8 +99,8 @@ export default function HomeScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
-        {agents.map((agent) => (
-          <AgentCard key={agent.id} agent={agent} onPress={() => openChat(agent.id)} />
+        {displayAgents.map((agent: any) => (
+          <AgentCard key={agent._id || agent.id} agent={agent} onPress={() => openChat(agent._id || agent.id)} />
         ))}
 
         {/* Add Agent Card */}
@@ -98,7 +111,7 @@ export default function HomeScreen() {
       </ScrollView>
 
       {/* Empty State */}
-      {agents.length === 0 && !loading && (
+      {displayAgents.length === 0 && (
         <View style={styles.empty}>
           <Ionicons name="rocket-outline" size={64} color="#C7C7CC" />
           <Text style={styles.emptyTitle}>No agents yet</Text>
@@ -112,14 +125,16 @@ export default function HomeScreen() {
   );
 }
 
-function AgentCard({ agent, onPress }: { agent: LocalAgent; onPress: () => void }) {
+function AgentCard({ agent, onPress }: { agent: any; onPress: () => void }) {
+  const status = agent.status as AgentStatus;
+  
   const statusColor = {
     creating: '#FF9500',
     running: '#34C759',
     idle: '#FFCC00',
     stopped: '#8E8E93',
     error: '#FF3B30',
-  }[agent.status];
+  }[status];
 
   const statusIcon = {
     creating: 'sync',
@@ -127,12 +142,12 @@ function AgentCard({ agent, onPress }: { agent: LocalAgent; onPress: () => void 
     idle: 'pause-circle',
     stopped: 'stop-circle',
     error: 'alert-circle',
-  }[agent.status] as keyof typeof Ionicons.glyphMap;
+  }[status] as keyof typeof Ionicons.glyphMap;
 
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.7}>
       <View style={styles.cardHeader}>
-        <Text style={styles.cardIcon}>{agent.icon}</Text>
+        <Text style={styles.cardIcon}>{agent.icon || '🤖'}</Text>
         <View style={styles.cardStatus}>
           <Ionicons name={statusIcon} size={12} color={statusColor} />
         </View>
@@ -147,11 +162,11 @@ function AgentCard({ agent, onPress }: { agent: LocalAgent; onPress: () => void 
       </Text>
 
       <View style={styles.cardFooter}>
-        <Text style={styles.cardCost}>${agent.monthlyCost.toFixed(2)}</Text>
+        <Text style={styles.cardCost}>${(agent.monthlyCost || 0).toFixed(2)}</Text>
         <Text style={styles.cardPeriod}>this month</Text>
       </View>
 
-      {agent.status === 'running' && (
+      {status === 'running' && (
         <View style={styles.cardBadge}>
           <Text style={styles.cardBadgeText}>Active</Text>
         </View>
@@ -167,6 +182,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F2F2F7',
+  },
+  loading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   header: {
     flexDirection: 'row',

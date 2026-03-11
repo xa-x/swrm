@@ -1,77 +1,42 @@
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert, Switch } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useAgent, useAgentActions, useUsageByAgent, useStartAgent, useStopAgent, useRestartAgent, useDeleteAgent } from '../../lib/hooks';
 import { Ionicons } from '@expo/vector-icons';
-import { agentsDb, LocalAgent, AgentStatus } from '../../lib/db';
-import { api } from '../../lib/api';
 
 export default function AgentDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [agent, setAgent] = useState<LocalAgent | null>(null);
-  const [usage, setUsage] = useState({ totalCost: 0, sessionCount: 0 });
-
-  useEffect(() => {
-    loadAgent();
-    loadUsage();
-  }, [id]);
-
-  const loadAgent = async () => {
-    if (!id) return;
-    const data = await agentsDb.getById(id);
-    setAgent(data);
-
-    // Sync with server
-    try {
-      const { agent: serverAgent } = await api.getAgent(id);
-      if (serverAgent) {
-        await agentsDb.upsert({
-          id: serverAgent.id,
-          name: serverAgent.name,
-          provider: serverAgent.provider,
-          model: serverAgent.model,
-          personality: serverAgent.personality,
-          skills: serverAgent.skills,
-          status: serverAgent.status,
-        });
-        const updated = await agentsDb.getById(id);
-        setAgent(updated);
-      }
-    } catch (err) {
-      console.error('Failed to sync agent:', err);
-    }
-  };
-
-  const loadUsage = async () => {
-    if (!id) return;
-    try {
-      const { summary } = await api.getUsage(id);
-      setUsage({
-        totalCost: summary.totalCost,
-        sessionCount: summary.sessionCount,
-      });
-    } catch (err) {
-      console.error('Failed to load usage:', err);
-    }
-  };
+  
+  // Convex hooks
+  const agent = useAgent(id as any);
+  const actions = useAgentActions(id as any, 20);
+  const usage = useUsageByAgent(id as any, 'month');
+  
+  // Mutations
+  const startAgent = useStartAgent();
+  const stopAgent = useStopAgent();
+  const restartAgent = useRestartAgent();
+  const deleteAgent = useDeleteAgent();
 
   const handleStart = async () => {
-    if (!id) return;
     try {
-      await api.startAgent(id);
-      await agentsDb.updateStatus(id, 'running');
-      loadAgent();
+      await startAgent({ agentId: id as any });
     } catch (err: any) {
       Alert.alert('Error', err.message);
     }
   };
 
   const handleStop = async () => {
-    if (!id) return;
     try {
-      await api.stopAgent(id);
-      await agentsDb.updateStatus(id, 'stopped');
-      loadAgent();
+      await stopAgent({ agentId: id as any });
+    } catch (err: any) {
+      Alert.alert('Error', err.message);
+    }
+  };
+
+  const handleRestart = async () => {
+    try {
+      await restartAgent({ agentId: id as any });
     } catch (err: any) {
       Alert.alert('Error', err.message);
     }
@@ -87,10 +52,8 @@ export default function AgentDetailScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            if (!id) return;
             try {
-              await api.deleteAgent(id);
-              await agentsDb.delete(id);
+              await deleteAgent({ agentId: id as any });
               router.back();
             } catch (err: any) {
               Alert.alert('Error', err.message);
@@ -128,7 +91,7 @@ export default function AgentDetailScreen() {
         {/* Agent Info */}
         <View style={styles.section}>
           <View style={styles.agentInfo}>
-            <Text style={styles.agentIcon}>{agent.icon}</Text>
+            <Text style={styles.agentIcon}>{agent.icon || '🤖'}</Text>
             <View style={styles.agentDetails}>
               <Text style={styles.agentName}>{agent.name}</Text>
               <View style={styles.statusRow}>
@@ -152,6 +115,11 @@ export default function AgentDetailScreen() {
               </TouchableOpacity>
             )}
 
+            <TouchableOpacity style={styles.restartButton} onPress={handleRestart}>
+              <Ionicons name="refresh" size={20} color="#007AFF" />
+              <Text style={styles.restartButtonText}>Restart</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity style={styles.chatButton} onPress={() => router.push(`/chat/${id}`)}>
               <Ionicons name="chatbubble" size={20} color="#007AFF" />
               <Text style={styles.chatButtonText}>Chat</Text>
@@ -160,17 +128,27 @@ export default function AgentDetailScreen() {
         </View>
 
         {/* Usage */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>This Month</Text>
-          <View style={styles.usageRow}>
-            <Text style={styles.usageLabel}>Cost</Text>
-            <Text style={styles.usageValue}>${usage.totalCost.toFixed(2)}</Text>
+        {usage && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>This Month</Text>
+            <View style={styles.usageRow}>
+              <Text style={styles.usageLabel}>Cost</Text>
+              <Text style={styles.usageValue}>
+                ${usage.summary.totalCost.toFixed(2)}
+              </Text>
+            </View>
+            <View style={styles.usageRow}>
+              <Text style={styles.usageLabel}>Sessions</Text>
+              <Text style={styles.usageValue}>{usage.summary.sessionCount}</Text>
+            </View>
+            <View style={styles.usageRow}>
+              <Text style={styles.usageLabel}>Tokens</Text>
+              <Text style={styles.usageValue}>
+                {((usage.summary.totalInputTokens + usage.summary.totalOutputTokens) / 1000).toFixed(1)}K
+              </Text>
+            </View>
           </View>
-          <View style={styles.usageRow}>
-            <Text style={styles.usageLabel}>Sessions</Text>
-            <Text style={styles.usageValue}>{usage.sessionCount}</Text>
-          </View>
-        </View>
+        )}
 
         {/* Configuration */}
         <View style={styles.section}>
@@ -193,7 +171,7 @@ export default function AgentDetailScreen() {
 
           <View style={styles.configRow}>
             <Text style={styles.configLabel}>Region</Text>
-            <Text style={styles.configValue}>{agent.region}</Text>
+            <Text style={styles.configValue}>{agent.region || 'auto'}</Text>
           </View>
         </View>
 
@@ -201,13 +179,28 @@ export default function AgentDetailScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Skills</Text>
           <View style={styles.skills}>
-            {JSON.parse(agent.skills as any).map((skill: string) => (
+            {agent.skills.map((skill: string) => (
               <View key={skill} style={styles.skillChip}>
                 <Text style={styles.skillChipText}>{skill}</Text>
               </View>
             ))}
           </View>
         </View>
+
+        {/* Recent Actions */}
+        {actions && actions.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Recent Actions</Text>
+            {actions.slice(0, 5).map((action: any) => (
+              <View key={action._id} style={styles.actionRow}>
+                <Text style={styles.actionName}>{action.action}</Text>
+                <Text style={styles.actionTime}>
+                  {new Date(action.createdAt).toLocaleDateString()}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Danger Zone */}
         <View style={styles.section}>
@@ -300,16 +293,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 16,
+    flexWrap: 'wrap',
   },
   startButton: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     backgroundColor: '#34C759',
+    paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 12,
+    minWidth: 100,
   },
   startButtonText: {
     fontSize: 16,
@@ -317,22 +312,22 @@ const styles = StyleSheet.create({
     color: '#FFF',
   },
   stopButton: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     backgroundColor: '#FF3B30',
+    paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 12,
+    minWidth: 100,
   },
   stopButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#FFF',
   },
-  chatButton: {
-    flex: 1,
+  restartButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -340,8 +335,28 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
     borderWidth: 2,
     borderColor: '#007AFF',
+    paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 12,
+    minWidth: 100,
+  },
+  restartButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  chatButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#FFF',
+    borderWidth: 2,
+    borderColor: '#007AFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    minWidth: 100,
   },
   chatButtonText: {
     fontSize: 16,
@@ -394,6 +409,22 @@ const styles = StyleSheet.create({
   skillChipText: {
     fontSize: 14,
     color: '#000',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F7',
+  },
+  actionName: {
+    fontSize: 14,
+    color: '#000',
+    textTransform: 'capitalize',
+  },
+  actionTime: {
+    fontSize: 14,
+    color: '#8E8E93',
   },
   deleteButton: {
     flexDirection: 'row',

@@ -4,132 +4,27 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
-import * as Speech from 'expo-speech';
-import { agentsDb, messagesDb, sessionsDb, LocalMessage, LocalAgent } from '../../lib/db';
-import { api } from '../../lib/api';
-import { useWebSocket } from '../../lib/websocket';
+import { useAgent, useChatHistory, useSendMessage } from '../../lib/hooks';
+import { messagesDb, sessionsDb } from '../../lib/db';
 
 export default function ChatScreen() {
   const { id: agentId } = useLocalSearchParams<{ id: string }>();
-  const [agent, setAgent] = useState<LocalAgent | null>(null);
-  const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [inputText, setInputText] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // WebSocket connection
-  const { isConnected, isTyping: wsTyping, send, onMessage, sessionId: wsSessionId } = useWebSocket(
-    agentId,
-    null // userId from auth
-  );
+  // Convex hooks
+  const agent = useAgent(agentId as any);
+  const messages = useChatHistory(agentId as any, sessionId || undefined);
+  const sendMessage = useSendMessage();
 
   useEffect(() => {
-    loadAgent();
-    loadMessages();
-  }, [agentId]);
-
-  useEffect(() => {
-    // Listen for incoming messages
-    const unsubscribe = onMessage((msg) => {
-      if (msg.type === 'message' && msg.role === 'assistant') {
-        addAssistantMessage(msg.content || '', msg.tokens || 0, msg.cost || 0);
-        setIsTyping(false);
-      }
-      if (msg.type === 'typing') {
-        setIsTyping(msg.status || false);
-      }
-    });
-
-    return unsubscribe;
-  }, [onMessage]);
-
-  useEffect(() => {
-    if (wsSessionId) {
-      setSessionId(wsSessionId);
+    // Create or get session
+    if (agentId && !sessionId) {
+      sessionsDb.create(agentId).then(setSessionId);
     }
-  }, [wsSessionId]);
-
-  const loadAgent = async () => {
-    if (!agentId) return;
-    const agentData = await agentsDb.getById(agentId);
-    setAgent(agentData);
-  };
-
-  const loadMessages = async () => {
-    if (!agentId) return;
-    const recent = await messagesDb.getRecent(agentId, 100);
-    setMessages(recent.reverse());
-  };
-
-  const addAssistantMessage = async (content: string, tokens: number, cost: number) => {
-    if (!agentId || !sessionId) return;
-
-    await messagesDb.add({
-      agentId,
-      sessionId,
-      role: 'assistant',
-      content,
-      tokens,
-      cost,
-    });
-
-    await agentsDb.updateCost(agentId, cost);
-
-    loadMessages();
-  };
-
-  const sendMessage = async () => {
-    if (!inputText.trim() || !agentId) return;
-
-    const text = inputText.trim();
-    setInputText('');
-
-    // Get or create session
-    let sid = sessionId;
-    if (!sid) {
-      sid = await sessionsDb.create(agentId);
-      setSessionId(sid);
-    }
-
-    // Add user message locally
-    await messagesDb.add({
-      agentId,
-      sessionId: sid,
-      role: 'user',
-      content: text,
-    });
-
-    loadMessages();
-
-    // Send via WebSocket or REST
-    if (isConnected) {
-      send(text);
-      setIsTyping(true);
-    } else {
-      // Fallback to REST
-      try {
-        setIsTyping(true);
-        const response = await api.sendMessage(agentId, text, sid);
-        
-        await messagesDb.add({
-          agentId,
-          sessionId: sid,
-          role: 'assistant',
-          content: response.response,
-          tokens: response.tokens.output,
-          cost: response.cost,
-        });
-
-        await agentsDb.updateCost(agentId, response.cost);
-        loadMessages();
-      } catch (err) {
-        console.error('Failed to send message:', err);
-      } finally {
-        setIsTyping(false);
-      }
-    }
-  };
+  }, [agentId, sessionId]);
 
   const scrollToBottom = useCallback(() => {
     scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -139,10 +34,47 @@ export default function ChatScreen() {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  if (!agent) {
+  const handleSend = async () => {
+    if (!inputText.trim() || !agentId || !sessionId) return;
+
+    const text = inputText.trim();
+    setInputText('');
+    setIsTyping(true);
+
+    try {
+      // Send via Convex mutation
+      await sendMessage({
+        agentId: agentId as any,
+        content: text,
+        sessionId,
+      });
+    } catch (err) {
+      console.error('Failed to send message:', err);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  // Loading state
+  if (agent === undefined) {
     return (
       <SafeAreaView style={styles.container}>
         <ActivityIndicator size="large" />
+      </SafeAreaView>
+    );
+  }
+
+  // Agent not found
+  if (!agent) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.error}>
+          <Ionicons name="alert-circle" size={48} color="#FF3B30" />
+          <Text style={styles.errorText}>Agent not found</Text>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Text style={styles.errorLink}>Go back</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }
@@ -158,14 +90,20 @@ export default function ChatScreen() {
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>{agent.name}</Text>
           <View style={styles.headerStatus}>
-            <View style={[styles.statusDot, { backgroundColor: agent.status === 'running' ? '#34C759' : '#8E8E93' }]} />
+            <View style={[
+              styles.statusDot, 
+              { backgroundColor: agent.status === 'running' ? '#34C759' : '#8E8E93' }
+            ]} />
             <Text style={styles.headerStatusText}>
               {isTyping ? 'typing...' : agent.status}
             </Text>
           </View>
         </View>
 
-        <TouchableOpacity style={styles.moreButton} onPress={() => router.push(`/agent/${agentId}`)}>
+        <TouchableOpacity 
+          style={styles.moreButton} 
+          onPress={() => router.push(`/agent/${agentId}`)}
+        >
           <Ionicons name="ellipsis-horizontal" size={24} color="#007AFF" />
         </TouchableOpacity>
       </View>
@@ -183,8 +121,17 @@ export default function ChatScreen() {
           onContentSizeChange={scrollToBottom}
           showsVerticalScrollIndicator={false}
         >
-          {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
+          {messages && messages.length === 0 && (
+            <View style={styles.empty}>
+              <Text style={styles.emptyIcon}>💬</Text>
+              <Text style={styles.emptyText}>
+                Start a conversation with {agent.name}
+              </Text>
+            </View>
+          )}
+
+          {messages && messages.map((message) => (
+            <MessageBubble key={message._id} message={message} />
           ))}
 
           {isTyping && (
@@ -215,8 +162,11 @@ export default function ChatScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-            onPress={sendMessage}
+            style={[
+              styles.sendButton, 
+              !inputText.trim() && styles.sendButtonDisabled
+            ]}
+            onPress={handleSend}
             disabled={!inputText.trim()}
           >
             <Ionicons name="arrow-up" size={20} color="#FFF" />
@@ -227,7 +177,7 @@ export default function ChatScreen() {
   );
 }
 
-function MessageBubble({ message }: { message: LocalMessage }) {
+function MessageBubble({ message }: { message: any }) {
   const isUser = message.role === 'user';
 
   return (
@@ -245,6 +195,20 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFF',
+  },
+  error: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+  },
+  errorText: {
+    fontSize: 18,
+    color: '#000',
+  },
+  errorLink: {
+    fontSize: 16,
+    color: '#007AFF',
   },
   header: {
     flexDirection: 'row',
@@ -293,6 +257,18 @@ const styles = StyleSheet.create({
   messagesContent: {
     padding: 16,
     paddingBottom: 8,
+  },
+  empty: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#8E8E93',
   },
   bubble: {
     maxWidth: '85%',

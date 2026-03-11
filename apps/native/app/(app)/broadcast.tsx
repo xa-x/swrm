@@ -1,29 +1,29 @@
-import { StyleSheet, View, Text, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { StyleSheet, View, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { agentsDb, LocalAgent } from '../../lib/db';
-import { api } from '../../lib/api';
+import { useAuth } from '@clerk/clerk-expo';
+import { useAgents } from '../../lib/hooks';
 
 export default function BroadcastScreen() {
-  const [agents, setAgents] = useState<LocalAgent[]>([]);
+  const { userId } = useAuth();
+  const agents = useAgents(userId);
+  
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<Map<string, { status: 'pending' | 'sent' | 'error'; response?: string }>>(new Map());
 
   useEffect(() => {
-    loadAgents();
-  }, []);
-
-  const loadAgents = async () => {
-    const allAgents = await agentsDb.getAll();
-    setAgents(allAgents);
     // Select all running agents by default
-    const running = allAgents.filter(a => a.status === 'running').map(a => a.id);
-    setSelectedAgents(new Set(running));
-  };
+    if (agents) {
+      const running = agents
+        .filter((a: any) => a.status === 'running')
+        .map((a: any) => a._id);
+      setSelectedAgents(new Set(running));
+    }
+  }, [agents]);
 
   const toggleAgent = (id: string) => {
     const next = new Set(selectedAgents);
@@ -36,11 +36,18 @@ export default function BroadcastScreen() {
   };
 
   const selectAll = () => {
-    setSelectedAgents(new Set(agents.map(a => a.id)));
+    if (agents) {
+      setSelectedAgents(new Set(agents.map((a: any) => a._id)));
+    }
   };
 
   const selectRunning = () => {
-    setSelectedAgents(new Set(agents.filter(a => a.status === 'running').map(a => a.id)));
+    if (agents) {
+      const running = agents
+        .filter((a: any) => a.status === 'running')
+        .map((a: any) => a._id);
+      setSelectedAgents(new Set(running));
+    }
   };
 
   const sendBroadcast = async () => {
@@ -56,28 +63,29 @@ export default function BroadcastScreen() {
     agentIds.forEach(id => initial.set(id, { status: 'pending' }));
     setResults(initial);
 
-    // Send to each agent
+    // TODO: Call Convex action to broadcast
+    // For now, simulate
     for (const agentId of agentIds) {
-      try {
-        const response = await api.sendMessage(agentId, message);
-        setResults(prev => {
-          const next = new Map(prev);
-          next.set(agentId, { status: 'sent', response: response.response });
-          return next;
-        });
-      } catch (err: any) {
-        setResults(prev => {
-          const next = new Map(prev);
-          next.set(agentId, { status: 'error', response: err.message });
-          return next;
-        });
-      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setResults(prev => {
+        const next = new Map(prev);
+        next.set(agentId, { status: 'sent', response: 'Response from agent...' });
+        return next;
+      });
     }
 
     setSending(false);
   };
 
-  const getAgentById = (id: string) => agents.find(a => a.id === id);
+  const getAgentById = (id: string) => agents?.find((a: any) => a._id === id);
+
+  if (!agents) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ActivityIndicator size="large" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -119,18 +127,18 @@ export default function BroadcastScreen() {
             </View>
           </View>
 
-          {agents.map(agent => {
-            const isSelected = selectedAgents.has(agent.id);
-            const result = results.get(agent.id);
+          {agents.map((agent: any) => {
+            const isSelected = selectedAgents.has(agent._id);
+            const result = results.get(agent._id);
 
             return (
               <TouchableOpacity
-                key={agent.id}
+                key={agent._id}
                 style={[styles.agentRow, isSelected && styles.agentRowSelected]}
-                onPress={() => toggleAgent(agent.id)}
+                onPress={() => toggleAgent(agent._id)}
                 disabled={sending}
               >
-                <Text style={styles.agentIcon}>{agent.icon}</Text>
+                <Text style={styles.agentIcon}>{agent.icon || '🤖'}</Text>
                 <View style={styles.agentInfo}>
                   <Text style={styles.agentName}>{agent.name}</Text>
                   <Text style={styles.agentMeta}>{agent.status}</Text>

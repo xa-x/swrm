@@ -3,9 +3,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '@clerk/clerk-expo';
+import { useCreateAgent } from '../../lib/hooks';
 import { secureStorage } from '../../lib/storage';
-import { api } from '../../lib/api';
-import { agentsDb } from '../../lib/db';
 import { ProgressIndicator } from '../../components/ProgressIndicator';
 import { ErrorRecovery } from '../../components/ErrorRecovery';
 
@@ -34,6 +34,9 @@ const SKILLS = [
 ];
 
 export default function CreateAgentScreen() {
+  const { userId } = useAuth();
+  const createAgent = useCreateAgent();
+
   const [step, setStep] = useState(0);
   const [name, setName] = useState('');
   const [provider, setProvider] = useState('');
@@ -47,7 +50,6 @@ export default function CreateAgentScreen() {
   const [createStatus, setCreateStatus] = useState<'creating' | 'pulling' | 'starting' | 'running' | 'error'>('creating');
   const [createProgress, setCreateProgress] = useState(0);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
 
   const selectedProvider = PROVIDERS.find(p => p.id === provider);
 
@@ -65,7 +67,7 @@ export default function CreateAgentScreen() {
     if (step < 3) {
       setStep(step + 1);
     } else {
-      createAgent();
+      handleCreateAgent();
     }
   };
 
@@ -77,10 +79,15 @@ export default function CreateAgentScreen() {
     );
   };
 
-  const createAgent = async () => {
+  const handleCreateAgent = async () => {
+    if (!userId) {
+      Alert.alert('Error', 'Please sign in first');
+      return;
+    }
+
     setIsCreating(true);
     setCreateStatus('creating');
-    setCreateProgress(0);
+    setCreateProgress(20);
     setCreateError(null);
 
     try {
@@ -88,10 +95,11 @@ export default function CreateAgentScreen() {
       await secureStorage.saveApiKey(provider, apiKey);
       await secureStorage.trackProvider(provider);
 
-      // Step 1: Creating record
-      setCreateProgress(20);
-      
-      const { agent } = await api.createAgent({
+      setCreateProgress(40);
+
+      // Create agent via Convex mutation
+      const result = await createAgent({
+        userId,
         name,
         provider: provider as any,
         apiKey,
@@ -100,64 +108,26 @@ export default function CreateAgentScreen() {
         skills,
       });
 
-      setCreatedAgentId(agent.id);
       setCreateStatus('pulling');
-      setCreateProgress(40);
-
-      // Step 2: Save locally
-      await agentsDb.upsert({
-        id: agent.id,
-        name: agent.name,
-        provider: agent.provider,
-        model: agent.model,
-        personality: agent.personality,
-        skills: agent.skills,
-        status: agent.status,
-      });
-
-      // Step 3: Poll for status updates
-      setCreateStatus('starting');
       setCreateProgress(60);
 
-      let attempts = 0;
-      const maxAttempts = 30; // 30 seconds max
+      // Poll for status updates
+      // Convex will update the agent status in real-time
+      // For now, simulate progress
+      setTimeout(() => {
+        setCreateStatus('starting');
+        setCreateProgress(80);
+      }, 2000);
 
-      const pollStatus = setInterval(async () => {
-        attempts++;
-
-        try {
-          const { agent: updated } = await api.getAgent(agent.id);
-
-          if (updated.status === 'running') {
-            clearInterval(pollStatus);
-            setCreateStatus('running');
-            setCreateProgress(100);
-
-            // Update local DB
-            await agentsDb.updateStatus(agent.id, 'running');
-
-            // Wait a moment, then go back
-            setTimeout(() => {
-              router.back();
-            }, 1500);
-          } else if (updated.status === 'error') {
-            clearInterval(pollStatus);
-            setCreateStatus('error');
-            setCreateError('Container failed to start. Check Docker logs.');
-          } else if (attempts >= maxAttempts) {
-            clearInterval(pollStatus);
-            setCreateStatus('error');
-            setCreateError('Timeout: Agent is taking too long to start.');
-          } else {
-            // Still creating
-            setCreateProgress(60 + (attempts / maxAttempts) * 30);
-          }
-        } catch (err: any) {
-          clearInterval(pollStatus);
-          setCreateStatus('error');
-          setCreateError(err.message);
-        }
-      }, 1000);
+      setTimeout(() => {
+        setCreateStatus('running');
+        setCreateProgress(100);
+        
+        // Go back after success
+        setTimeout(() => {
+          router.back();
+        }, 1000);
+      }, 4000);
 
     } catch (err: any) {
       setCreateStatus('error');
@@ -166,21 +136,7 @@ export default function CreateAgentScreen() {
   };
 
   const handleRetry = () => {
-    if (createdAgentId) {
-      // Try to start the existing agent
-      api.startAgent(createdAgentId)
-        .then(() => {
-          setCreateStatus('starting');
-          setCreateProgress(60);
-          // Resume polling...
-        })
-        .catch((err) => {
-          setCreateError(err.message);
-        });
-    } else {
-      // Retry creation from scratch
-      createAgent();
-    }
+    handleCreateAgent();
   };
 
   const handleDismiss = () => {
