@@ -3,9 +3,10 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@/*": ["./*"],
+      "@lib/*": ["./lib/*"],
+      "@swrm/backend/*": ["../../packages/backend/*"],
+      "@swrm/shared/*": ["../../packages/shared/*"]
     }
   },
   "include": [

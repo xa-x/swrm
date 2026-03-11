@@ -4,8 +4,8 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
-import { useAgent, useChatHistory, useSendMessage } from '../../lib/hooks';
-import { messagesDb, sessionsDb } from '../../lib/db';
+import { useAgent, useChatHistory, useSendMessage } from '../../../lib/hooks';
+import { messagesDb, sessionsDb } from '../../../lib/db';
 
 export default function ChatScreen() {
   const { id: agentId } = useLocalSearchParams<{ id: string }>();

@@ -1,7 +1,7 @@
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { useAgent, useAgentActions, useUsageByAgent, useStartAgent, useStopAgent, useRestartAgent, useDeleteAgent } from '../../lib/hooks';
+import { useAgent, useAgentActions, useUsageByAgent, useStartAgent, useStopAgent, useRestartAgent, useDeleteAgent } from '@/lib/hooks';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function AgentDetailScreen() {

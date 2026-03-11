@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "convex/react";
-import { api } from "../../backend/_generated/api";
-import type { Doc, Id } from "../../backend/_generated/dataModel";
+import { api } from "@swrm/backend/convex/_generated/api";
+import type { Doc, Id } from "@swrm/backend/convex/_generated/dataModel";
 
 // ============ AGENTS ============
 
