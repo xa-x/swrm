@@ -30,10 +30,11 @@ git push -u origin main
 ## 3. Set Up Convex
 
 ```bash
-# Install Convex CLI
-npm install -g convex
+# Install dependencies (all workspaces)
+npm install
 
-# Login
+# Login to Convex
+cd packages/backend
 npx convex login
 
 # Deploy (creates backend automatically)
@@ -58,15 +59,16 @@ fly apps create swrm-agents
 # Generate long-lived token
 fly tokens create deploy -x 999999h
 
-# Add token to Convex
+# Add token to Convex (from packages/backend)
+cd packages/backend
 npx convex env set FLY_API_TOKEN <your-token>
 npx convex env set FLY_APP_NAME swrm-agents
 ```
 
-## 5. Set Up App
+## 5. Set Up Native App
 
 ```bash
-cd app
+cd apps/native
 
 # Copy env
 cp .env.example .env
@@ -74,7 +76,7 @@ cp .env.example .env
 # Add Convex URL
 echo "EXPO_PUBLIC_CONVEX_URL=https://your-name.convex.cloud" >> .env
 
-# Install
+# Install dependencies
 npm install
 
 # Run
@@ -88,18 +90,18 @@ npx expo start
 # Create app
 # Copy publishable key
 
-# Add to app/.env
+# Add to apps/native/.env
 echo "EXPO_PUBLIC_CLERK_KEY=pk_test_..." >> .env
 ```
 
 ## 7. Deploy to Production
 
 ```bash
-# Deploy Convex
-npx convex deploy
+# Deploy Convex (from root or packages/backend)
+npm run deploy
 
-# Build app
-cd app
+# Build native app
+cd apps/native
 eas build --platform ios
 eas submit
 ```
@@ -110,12 +112,11 @@ eas submit
 
 | Step | Command | Time |
 |------|---------|------|
-| Create GitHub repo | `gh repo create` | 1 min |
-| Push code | `git push` | 30 sec |
-| Set up Convex | `npx convex deploy` | 2 min |
+| Install dependencies | `npm install` | 1 min |
+| Set up Convex | `cd packages/backend && npx convex deploy` | 2 min |
 | Set up Fly.io | `fly apps create` | 1 min |
 | Configure env | `npx convex env set` | 1 min |
-| Run app | `npx expo start` | 30 sec |
+| Run app | `npm run dev:native` | 30 sec |
 
 **Total: ~5 minutes to MVP**
 
@@ -131,16 +132,22 @@ eas submit
 
 ## 🔑 Environment Variables
 
-### Convex (set via `npx convex env set`)
+### Convex (set via `npx convex env set` from packages/backend)
 ```
 FLY_API_TOKEN=...
 FLY_APP_NAME=swrm-agents
 ```
 
-### App (set in `app/.env`)
+### Native App (set in `apps/native/.env`)
 ```
 EXPO_PUBLIC_CONVEX_URL=https://...
 EXPO_PUBLIC_CLERK_KEY=pk_test_...
+```
+
+### Web App (when ready, set in `apps/web/.env.local`)
+```
+NEXT_PUBLIC_CONVEX_URL=https://...
+NEXT_PUBLIC_CLERK_KEY=pk_test_...
 ```
 
 ---
@@ -149,6 +156,8 @@ EXPO_PUBLIC_CLERK_KEY=pk_test_...
 
 ### Convex won't deploy
 ```bash
+cd packages/backend
+
 # Check auth
 npx convex whoami
 
@@ -159,6 +168,8 @@ npx convex login
 
 ### Fly.io token invalid
 ```bash
+cd packages/backend
+
 # Generate new token
 fly tokens create deploy -x 999999h
 
@@ -169,8 +180,63 @@ npx convex env set FLY_API_TOKEN <new-token>
 ### App won't connect to Convex
 ```bash
 # Check CONVEX_URL
-cat app/.env
+cat apps/native/.env
 
 # Should be:
 EXPO_PUBLIC_CONVEX_URL=https://your-name.convex.cloud
+```
+
+### npm install fails
+```bash
+# Clean and reinstall
+npm run clean
+```
+
+---
+
+## 📁 Monorepo Structure
+
+```
+swrm/
+├── apps/
+│   ├── native/         # Expo mobile app
+│   └── web/            # Next.js web app (coming soon)
+│
+├── packages/
+│   ├── backend/        # Convex backend
+│   │   ├── schema.ts
+│   │   ├── agents.ts
+│   │   ├── chat.ts
+│   │   └── ...
+│   ├── shared/         # Shared types & utilities
+│   ├── eslint-config/  # Shared ESLint config
+│   └── typescript-config/ # Shared TS configs
+│
+├── package.json        # Root (workspaces)
+├── .env.example        # Environment template
+└── README.md
+```
+
+---
+
+## 🛠️ Development Commands
+
+```bash
+# Run native app
+npm run dev:native
+
+# Run web app (when ready)
+npm run dev:web
+
+# Run Convex dev (watches for changes)
+npm run dev:backend
+
+# Deploy Convex
+npm run deploy
+
+# View Convex logs
+cd packages/backend && npx convex logs
+
+# Open Convex dashboard
+cd packages/backend && npx convex dashboard
 ```

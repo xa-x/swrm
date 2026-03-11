@@ -6,9 +6,9 @@ Deploy AI agents. Control from anywhere.
 
 ### Prerequisites
 - [Node.js 18+](https://nodejs.org)
-- [Convex account](https://convex.dev)
-- [Fly.io account](https://fly.io)
-- [Expo CLI](https://docs.expo.dev)
+- [Convex account](https://convex.dev) (free tier available)
+- [Fly.io account](https://fly.io) (for container hosting)
+- [Expo CLI](https://docs.expo.dev/get-started/installation/)
 
 ### Setup
 
@@ -17,14 +17,16 @@ Deploy AI agents. Control from anywhere.
 git clone https://github.com/xa-x/swrm.git
 cd swrm
 
-# Install dependencies (all workspaces)
+# Install all workspaces
 npm install
 
 # Set up Convex
+cd packages/backend
 npx convex login
 npx convex deploy
 
 # Configure environment
+cd ../..
 cp .env.example .env
 # Edit .env with your keys
 
@@ -33,11 +35,8 @@ fly apps create swrm-agents
 fly tokens create deploy -x 999999h
 npx convex env set FLY_API_TOKEN <token>
 
-# Run native app
+# Run the app
 npm run dev:native
-
-# Or run web app (when ready)
-npm run dev:web
 ```
 
 ## 📁 Monorepo Structure
@@ -54,20 +53,25 @@ swrm/
 │       └── app/          # App router
 │
 ├── packages/
+│   ├── backend/          # Convex backend
+│   │   ├── schema.ts     # Database schema
+│   │   ├── agents.ts     # Agent functions
+│   │   ├── chat.ts       # Chat functions
+│   │   ├── usage.ts      # Usage tracking
+│   │   ├── docker.ts     # Fly.io integration
+│   │   ├── http.ts       # HTTP actions
+│   │   └── crons.ts      # Scheduled jobs
+│   │
 │   ├── shared/           # Shared types & utilities
-│   ├── eslint-config/    # ESLint config
-│   └── typescript-config/ # TypeScript configs
+│   │   └── src/
+│   │       └── index.ts  # Types, providers, regions
+│   │
+│   ├── eslint-config/    # Shared ESLint config
+│   └── typescript-config/ # Shared TS configs
 │
-├── convex/               # Convex backend
-│   ├── schema.ts         # Database schema
-│   ├── agents.ts         # Agent functions
-│   ├── chat.ts           # Chat functions
-│   ├── usage.ts          # Usage tracking
-│   ├── docker.ts         # Fly.io integration
-│   ├── http.ts           # HTTP actions
-│   └── crons.ts          # Scheduled jobs
-│
-└── backend/              # Bun fallback (optional)
+├── package.json          # Root (workspaces)
+├── .env.example          # Environment template
+└── README.md
 ```
 
 ## 🏗️ Architecture
@@ -85,19 +89,19 @@ swrm/
                      │
                      ▼
 ┌─────────────────────────────────────────────────┐
-│              CONVEX (Backend)                     │
-│  - Real-time database                            │
-│  - Functions (mutations, queries, actions)       │
-│  - Scheduled jobs                                │
-│  - HTTP webhooks                                 │
-│  - Built-in dashboard                            │
+│         PACKAGES/BACKEND (Convex)                │
+│  - Database (real-time sync)                    │
+│  - Functions (mutations, queries, actions)      │
+│  - Scheduled jobs (crons)                       │
+│  - HTTP actions (webhooks)                      │
+│  - Built-in dashboard                           │
 └──────────────────────┬──────────────────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────────┐
 │              FLY.IO MACHINES                     │
 │  - ZeroClaw containers (per agent)              │
-│  - Auto-scaling                                 │
+│  - Auto-scaling (start/stop on demand)          │
 │  - Multiple regions                             │
 │  - $0.50-2/agent/month                          │
 └─────────────────────────────────────────────────┘
@@ -105,55 +109,40 @@ swrm/
 
 ## 🎯 Features
 
-- **Real-time sync** - Convex subscriptions
+- **Real-time sync** - Convex subscriptions for instant updates
 - **Card-based home** - Visual agent grid
-- **Markdown chat** - Rich messages
+- **Markdown chat** - Rich message rendering
 - **Swarm mode** - Broadcast to all agents
-- **Docker actions** - Start/stop/restart
+- **Docker actions** - Start/stop/restart via Fly.io
+- **Action logging** - Full audit trail
 - **Usage tracking** - Per-agent costs
 - **Push notifications** - Task alerts
-- **Offline-first** - Local cache
-- **Secure storage** - Encrypted API keys
-
-## 🛠️ Development
-
-```bash
-# Run Convex dev (watches for changes)
-npm run dev:convex
-
-# Run native app
-npm run dev:native
-
-# Run web app
-npm run dev:web
-
-# Build shared package
-npm run build
-
-# Deploy Convex
-npm run deploy
-
-# Clean all dependencies
-npm run clean
-```
+- **Offline-first** - Local SQLite cache
+- **Secure storage** - API keys encrypted
+- **Progress indicators** - Real-time status
+- **Error recovery** - Retry failed operations
+- **Cron jobs** - Automatic cleanup
+- **Built-in dashboard** - Convex UI
 
 ## 📦 Workspaces
 
-This is a monorepo using npm workspaces:
-
-| Workspace | Path | Description |
-|-----------|------|-------------|
-| `@swrm/native` | `apps/native` | Expo mobile app |
-| `@swrm/web` | `apps/web` | Next.js web app |
-| `@swrm/shared` | `packages/shared` | Shared types & utilities |
-| `@swrm/eslint-config` | `packages/eslint-config` | ESLint configuration |
-| `@swrm/typescript-config` | `packages/typescript-config` | TypeScript configs |
+| Workspace | Package Name | Path | Description |
+|-----------|--------------|------|-------------|
+| Native | `@swrm/native` | `apps/native` | Expo mobile app |
+| Web | `@swrm/web` | `apps/web` | Next.js web app |
+| Backend | `@swrm/backend` | `packages/backend` | Convex backend |
+| Shared | `@swrm/shared` | `packages/shared` | Shared types & utilities |
+| ESLint | `@swrm/eslint-config` | `packages/eslint-config` | ESLint configuration |
+| TypeScript | `@swrm/typescript-config` | `packages/typescript-config` | TypeScript configs |
 
 ### Add dependency to workspace
 
 ```bash
 # Add to native app
 npm install <package> -w @swrm/native
+
+# Add to backend
+npm install <package> -w @swrm/backend
 
 # Add to shared package
 npm install <package> -w @swrm/shared
@@ -162,67 +151,171 @@ npm install <package> -w @swrm/shared
 npm install -D <package> -w @swrm/native
 ```
 
-## 🚢 Deployment
+## 🔒 Security
+
+| Layer | Protection |
+|-------|------------|
+| **API keys** | Encrypted at rest (base64, use proper encryption in prod) |
+| **Auth** | Clerk integration |
+| **Rate limiting** | Convex built-in limits |
+| **Container isolation** | Fly.io Machines (512MB, 1 CPU) |
+| **Network** | Internal Fly.io network |
+| **Secrets** | Convex environment variables |
+
+## 💰 Cost
 
 ### Convex
-```bash
-npx convex deploy
+- **Free tier**: 100K function calls/month
+- **Pro**: $25/month for 1M function calls
+- **Est. cost**: Free for MVP, ~$25/mo at scale
+
+### Fly.io Machines
+- **Shared CPU**: $0.0015/hour (512MB)
+- **Est. per agent**: $0.50-2/month (idle most of the time)
+- **10 agents**: ~$10-20/month
+
+### Total
+- **MVP (10 agents)**: ~$10-20/month
+- **Scale (100 agents)**: ~$50-100/month + Convex Pro
+
+## 🚀 Agent Creation Flow
+
+```
+User taps [+] → Wizard (4 steps)
+  ↓
+Convex mutation: agents.create()
+  ↓
+Action scheduled: docker.createContainer()
+  ↓
+Fly.io API: POST /machines
+  ↓
+Machine starts → Agent ready
+  ↓
+Real-time update: status → "running"
+  ↓
+Card appears on home grid
 ```
 
-### Fly.io
+**Timeline:**
+- Machine creation: 5-10 seconds
+- From tap to ready: 10-15 seconds total
+
+## 🔧 Configuration
+
+### Convex Environment Variables
+```bash
+# Set via: npx convex env set KEY value
+cd packages/backend
+npx convex env set FLY_API_TOKEN <your-token>
+npx convex env set FLY_APP_NAME swrm-agents
+```
+
+### App Environment (.env)
+```bash
+EXPO_PUBLIC_CONVEX_URL=https://...
+EXPO_PUBLIC_CLERK_KEY=pk_test_...
+```
+
+## 📊 Convex Dashboard
+
+Access at `https://dashboard.convex.dev`:
+- **Data**: Browse all tables
+- **Functions**: View logs, run manually
+- **Crons**: See scheduled jobs
+- **Usage**: Monitor function calls
+- **Deployments**: View history
+
+## 🛠️ Development
+
+```bash
+# Run Convex dev (watches for changes)
+npm run dev:backend
+
+# Run native app
+npm run dev:native
+
+# Run web app
+npm run dev:web
+
+# Deploy Convex
+npm run deploy
+
+# View logs
+cd packages/backend && npx convex logs
+
+# Open dashboard
+cd packages/backend && npx convex dashboard
+```
+
+## 🚢 Deployment
+
+### Convex (Automatic)
+```bash
+npm run deploy
+```
+Convex deploys to their cloud automatically.
+
+### Fly.io (One-time setup)
 ```bash
 fly apps create swrm-agents
-fly tokens create deploy -x 999999h
+fly tokens create deploy -x 999999h  # Long-lived token
+cd packages/backend
 npx convex env set FLY_API_TOKEN <token>
 ```
 
-### Native App
+### Native App (EAS)
 ```bash
 cd apps/native
 eas build --platform ios
 eas submit
 ```
 
-### Web App
+### Web App (Vercel)
 ```bash
 cd apps/web
 vercel deploy
 ```
 
-## 💰 Cost
+## 📝 API Reference
 
-### Convex
-- **Free tier**: 100K function calls/month
-- **Pro**: $25/month for 1M calls
-- **Est**: Free for MVP, ~$25/mo at scale
+### Convex Functions
 
-### Fly.io Machines
-- **Shared CPU**: $0.0015/hour (512MB)
-- **Est per agent**: $0.50-2/month
-- **10 agents**: ~$10-20/month
+**Agents:**
+```
+agents.list(userId)          → Agent[]
+agents.get(agentId)          → Agent
+agents.create(...)           → { agentId, status }
+agents.update(agentId, ...)  → { success }
+agents.remove(agentId)       → { success }
+agents.start(agentId)        → { success, status }
+agents.stop(agentId)         → { success, status }
+agents.restart(agentId)      → { success, status }
+```
 
-### Total
-- **MVP**: ~$10-20/month
-- **Scale**: ~$50-100/month
+**Chat:**
+```
+chat.getHistory(agentId, sessionId?) → Message[]
+chat.send(agentId, content, sessionId?) → { response, tokens, cost }
+```
 
-## 📊 Convex Dashboard
+**Usage:**
+```
+usage.getByAgent(agentId, period) → { records, summary }
+usage.getByUser(userId, period)   → { agents, totals }
+```
 
-Access at https://dashboard.convex.dev:
-- Data browser
-- Function logs
-- Usage metrics
-- Scheduled crons
-- Deploy history
+## 🔄 Real-time Subscriptions
 
-## 🔒 Security
+```typescript
+// Subscribe to agent list
+const agents = useQuery(api.agents.list, { userId });
 
-| Layer | Protection |
-|-------|------------|
-| **API keys** | Encrypted at rest |
-| **Auth** | Clerk integration |
-| **Rate limiting** | Convex built-in |
-| **Containers** | Fly.io isolation |
-| **Secrets** | Convex env variables |
+// Subscribe to single agent
+const agent = useQuery(api.agents.get, { agentId });
+
+// Subscribe to chat history
+const messages = useQuery(api.chat.getHistory, { agentId, sessionId });
+```
 
 ## 📝 License
 

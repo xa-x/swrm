@@ -4,16 +4,15 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*",
-    "convex"
+    "packages/*"
   ],
   "scripts": {
     "dev": "npm run dev:native",
     "dev:native": "npm run dev -w @swrm/native",
     "dev:web": "npm run dev -w @swrm/web",
-    "dev:convex": "npx convex dev",
+    "dev:backend": "npm run dev -w @swrm/backend",
     "build": "npm run build -w @swrm/shared",
-    "deploy": "npx convex deploy",
+    "deploy": "npm run deploy -w @swrm/backend",
     "lint": "npm run lint -w @swrm/shared -w @swrm/native -w @swrm/web",
     "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules && npm install"
   },
