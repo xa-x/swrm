@@ -6,12 +6,15 @@ import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator } from 'react-native';
 import { ClerkProvider, useAuth } from '@clerk/clerk-expo';
 import * as SecureStore from 'expo-secure-store';
-import { ConvexProvider, ConvexReactClient, useQuery } from 'convex/react';
-import { initDatabase } from '../lib/db';
-import { registerForPushNotifications } from '../lib/notifications';
+import { ConvexProvider, ConvexReactClient } from 'convex/react';
+import { useQuery } from 'convex/react';
+import { initDatabase } from './lib/db';
+import { registerForPushNotifications } from './lib/notifications';
 
-// Convex client
+// Import Convex API (will be generated)
 const CONVEX_URL = process.env.EXPO_PUBLIC_CONVEX_URL;
+
+// Create Convex client (only if URL is set)
 const convex = CONVEX_URL ? new ConvexReactClient(CONVEX_URL) : null;
 
 // Clerk token cache
@@ -34,11 +37,10 @@ const tokenCache = {
 
 SplashScreen.preventAutoHideAsync();
 
-const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_KEY || '';
+const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY || '';
 
 export default function RootLayout() {
   const [dbReady, setDbReady] = useState(false);
-
   const [fontsLoaded] = useFonts({});
 
   useEffect(() => {
@@ -64,16 +66,16 @@ export default function RootLayout() {
     return null;
   }
 
-  if (!convex) {
+  if (!CONVEX_URL) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-        <StatusBar style="auto" />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: '#000' }}>
+        <StatusBar style="light" />
       </View>
     );
   }
 
   return (
-    <ConvexProvider client={convex}>
+    <ConvexProvider client={convex!}>
       <ClerkProvider
         publishableKey={CLERK_PUBLISHABLE_KEY}
         tokenCache={tokenCache}
@@ -89,16 +91,27 @@ export default function RootLayout() {
 
 function RootNavigator() {
   const { isSignedIn, isLoaded, userId } = useAuth();
+  const [hasCheckedAgents, setHasCheckedAgents] = useState(false);
+  const [hasAgents, setHasAgents] = useState(false);
 
-  // TODO: Use Convex query once api is generated
-  // const agents = useQuery(api.agents.list, userId ? { userId } : "skip");
-
+  // Register push notifications when signed in
   useEffect(() => {
     if (isSignedIn && userId) {
       registerForPushNotifications(userId);
     }
   }, [isSignedIn, userId]);
 
+  // Check if user has agents (for onboarding)
+  useEffect(() => {
+    if (isSignedIn && userId && convex) {
+      // For now, skip agent check and go to main app
+      // TODO: Query Convex for agent count
+      setHasAgents(true);
+      setHasCheckedAgents(true);
+    }
+  }, [isSignedIn, userId]);
+
+  // Loading state
   if (!isLoaded) {
     return null;
   }
@@ -112,8 +125,25 @@ function RootNavigator() {
     );
   }
 
-  // For now, skip setup check and go to main app
-  // TODO: Add agent count check once Convex is connected
+  // Checking agents
+  if (!hasCheckedAgents) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  // No agents → Setup wizard
+  if (!hasAgents) {
+    return (
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(setup)" />
+      </Stack>
+    );
+  }
+
+  // Has agents → Main app
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(app)" />

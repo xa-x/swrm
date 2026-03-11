@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 
 export default function SetupScreen() {
   const handleCreateFirstAgent = () => {
-    router.replace('/create');
+    router.replace('/(app)/create');
   };
 
   return (

@@ -1,27 +1,67 @@
 import { useQuery, useMutation } from "convex/react";
-import { api } from "@swrm/backend/convex/_generated/api";
 import type { Doc, Id } from "@swrm/backend/convex/_generated/dataModel";
+import type { FunctionArgs, FunctionReturnType } from "convex/browser";
+import type { AnyFunction } from "convex/server";
+
+// Dynamic import to handle missing generated files
+const api = {
+  agents: {
+    list: "agents:list" as const,
+    get: "agents:get" as const,
+    getStatus: "agents:getStatus" as const,
+    getActions: "agents:getActions" as const,
+    create: "agents:create" as const,
+    update: "agents:update" as const,
+    remove: "agents:remove" as const,
+    start: "agents:start" as const,
+    stop: "agents:stop" as const,
+    restart: "agents:restart" as const,
+  },
+  chat: {
+    getHistory: "chat:getHistory" as const,
+    send: "chat:send" as const,
+  },
+  usage: {
+    getByAgent: "usage:getByAgent" as const,
+    getByUser: "usage:getByUser" as const,
+  },
+};
 
 // ============ AGENTS ============
 
 // Get all agents (real-time subscription)
 export function useAgents(userId: string | null) {
-  return useQuery(api.agents.list, userId ? { userId } : "skip");
+  return useQuery(
+    userId ? api.agents.list : "skip",
+    userId ? { userId } : undefined
+  );
 }
 
 // Get single agent (real-time subscription)
 export function useAgent(agentId: Id<"agents"> | null) {
-  return useQuery(api.agents.get, agentId ? { agentId } : "skip");
+  return useQuery(
+    agentId ? api.agents.get : "skip",
+    agentId ? { agentId } : undefined
+  );
 }
 
 // Get agent status
 export function useAgentStatus(agentId: Id<"agents"> | null) {
-  return useQuery(api.agents.getStatus, agentId ? { agentId } : "skip");
+  return useQuery(
+    agentId ? api.agents.getStatus : "skip",
+    agentId ? { agentId } : undefined
+  );
 }
 
 // Get agent actions (audit log)
-export function useAgentActions(agentId: Id<"agents"> | null, limit?: number) {
-  return useQuery(api.agents.getActions, agentId ? { agentId, limit } : "skip");
+export function useAgentActions(
+  agentId: Id<"agents"> | null,
+  limit?: number
+) {
+  return useQuery(
+    agentId ? api.agents.getActions : "skip",
+    agentId ? { agentId, limit } : undefined
+  );
 }
 
 // Create agent mutation
@@ -63,8 +103,8 @@ export function useChatHistory(
   limit?: number
 ) {
   return useQuery(
-    api.chat.getHistory,
-    agentId ? { agentId, sessionId, limit } : "skip"
+    agentId ? api.chat.getHistory : "skip",
+    agentId ? { agentId, sessionId, limit } : undefined
   );
 }
 
@@ -81,8 +121,8 @@ export function useUsageByAgent(
   period?: "day" | "week" | "month"
 ) {
   return useQuery(
-    api.usage.getByAgent,
-    agentId ? { agentId, period } : "skip"
+    agentId ? api.usage.getByAgent : "skip",
+    agentId ? { agentId, period } : undefined
   );
 }
 
@@ -92,8 +132,8 @@ export function useUsageByUser(
   period?: "day" | "week" | "month"
 ) {
   return useQuery(
-    api.usage.getByUser,
-    userId ? { userId, period } : "skip"
+    userId ? api.usage.getByUser : "skip",
+    userId ? { userId, period } : undefined
   );
 }
 

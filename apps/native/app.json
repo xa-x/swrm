@@ -4,18 +4,21 @@
     "slug": "swrm",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/icon.png",
     "scheme": "swrm",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/splash-icon.png",
+      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "ai.swrm.app",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Allow Swrm to record voice messages for your agents."
       }
@@ -24,14 +27,17 @@
       "package": "ai.swrm.app",
       "adaptiveIcon": {
         "backgroundColor": "#000000",
-        "foregroundImage": "./assets/images/android-icon-foreground.png"
+        "foregroundImage": "./assets/adaptive-icon.png"
       },
-      "permissions": ["android.permission.RECORD_AUDIO"]
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.VIBRATE"
+      ]
     },
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-router",
@@ -39,20 +45,27 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/notification-icon.png",
+          "icon": "./assets/notification-icon.png",
           "color": "#007AFF"
+        }
+      ],
+      [
+        "@clerk/clerk-expo",
+        {
+          "tokenCache": true
         }
       ]
     ],
+    "experiments": {
+      "typedRoutes": true
+    },
     "extra": {
-      "clerkPublishableKey": "${EXPO_PUBLIC_CLERK_KEY}",
-      "apiUrl": "${EXPO_PUBLIC_API_URL}",
+      "router": {
+        "origin": false
+      },
       "eas": {
         "projectId": "your-project-id"
       }
-    },
-    "experiments": {
-      "typedRoutes": true
     }
   }
 }
