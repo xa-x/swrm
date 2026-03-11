@@ -1,0 +1,432 @@
+import { StyleSheet, View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useLocalSearchParams, router } from 'expo-router';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import Markdown from 'react-native-markdown-display';
+import * as Speech from 'expo-speech';
+import { agentsDb, messagesDb, sessionsDb, LocalMessage, LocalAgent } from '../../lib/db';
+import { api } from '../../lib/api';
+import { useWebSocket } from '../../lib/websocket';
+
+export default function ChatScreen() {
+  const { id: agentId } = useLocalSearchParams<{ id: string }>();
+  const [agent, setAgent] = useState<LocalAgent | null>(null);
+  const [messages, setMessages] = useState<LocalMessage[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  // WebSocket connection
+  const { isConnected, isTyping: wsTyping, send, onMessage, sessionId: wsSessionId } = useWebSocket(
+    agentId,
+    null // userId from auth
+  );
+
+  useEffect(() => {
+    loadAgent();
+    loadMessages();
+  }, [agentId]);
+
+  useEffect(() => {
+    // Listen for incoming messages
+    const unsubscribe = onMessage((msg) => {
+      if (msg.type === 'message' && msg.role === 'assistant') {
+        addAssistantMessage(msg.content || '', msg.tokens || 0, msg.cost || 0);
+        setIsTyping(false);
+      }
+      if (msg.type === 'typing') {
+        setIsTyping(msg.status || false);
+      }
+    });
+
+    return unsubscribe;
+  }, [onMessage]);
+
+  useEffect(() => {
+    if (wsSessionId) {
+      setSessionId(wsSessionId);
+    }
+  }, [wsSessionId]);
+
+  const loadAgent = async () => {
+    if (!agentId) return;
+    const agentData = await agentsDb.getById(agentId);
+    setAgent(agentData);
+  };
+
+  const loadMessages = async () => {
+    if (!agentId) return;
+    const recent = await messagesDb.getRecent(agentId, 100);
+    setMessages(recent.reverse());
+  };
+
+  const addAssistantMessage = async (content: string, tokens: number, cost: number) => {
+    if (!agentId || !sessionId) return;
+
+    await messagesDb.add({
+      agentId,
+      sessionId,
+      role: 'assistant',
+      content,
+      tokens,
+      cost,
+    });
+
+    await agentsDb.updateCost(agentId, cost);
+
+    loadMessages();
+  };
+
+  const sendMessage = async () => {
+    if (!inputText.trim() || !agentId) return;
+
+    const text = inputText.trim();
+    setInputText('');
+
+    // Get or create session
+    let sid = sessionId;
+    if (!sid) {
+      sid = await sessionsDb.create(agentId);
+      setSessionId(sid);
+    }
+
+    // Add user message locally
+    await messagesDb.add({
+      agentId,
+      sessionId: sid,
+      role: 'user',
+      content: text,
+    });
+
+    loadMessages();
+
+    // Send via WebSocket or REST
+    if (isConnected) {
+      send(text);
+      setIsTyping(true);
+    } else {
+      // Fallback to REST
+      try {
+        setIsTyping(true);
+        const response = await api.sendMessage(agentId, text, sid);
+        
+        await messagesDb.add({
+          agentId,
+          sessionId: sid,
+          role: 'assistant',
+          content: response.response,
+          tokens: response.tokens.output,
+          cost: response.cost,
+        });
+
+        await agentsDb.updateCost(agentId, response.cost);
+        loadMessages();
+      } catch (err) {
+        console.error('Failed to send message:', err);
+      } finally {
+        setIsTyping(false);
+      }
+    }
+  };
+
+  const scrollToBottom = useCallback(() => {
+    scrollViewRef.current?.scrollToEnd({ animated: true });
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
+
+  if (!agent) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ActivityIndicator size="large" />
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name="chevron-back" size={24} color="#007AFF" />
+        </TouchableOpacity>
+
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>{agent.name}</Text>
+          <View style={styles.headerStatus}>
+            <View style={[styles.statusDot, { backgroundColor: agent.status === 'running' ? '#34C759' : '#8E8E93' }]} />
+            <Text style={styles.headerStatusText}>
+              {isTyping ? 'typing...' : agent.status}
+            </Text>
+          </View>
+        </View>
+
+        <TouchableOpacity style={styles.moreButton} onPress={() => router.push(`/agent/${agentId}`)}>
+          <Ionicons name="ellipsis-horizontal" size={24} color="#007AFF" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Messages */}
+      <KeyboardAvoidingView
+        style={styles.content}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.messages}
+          contentContainerStyle={styles.messagesContent}
+          onContentSizeChange={scrollToBottom}
+          showsVerticalScrollIndicator={false}
+        >
+          {messages.map((message) => (
+            <MessageBubble key={message.id} message={message} />
+          ))}
+
+          {isTyping && (
+            <View style={styles.typingIndicator}>
+              <Text style={styles.typingText}>●●●</Text>
+            </View>
+          )}
+        </ScrollView>
+
+        {/* Input */}
+        <View style={styles.inputContainer}>
+          <TouchableOpacity style={styles.attachButton}>
+            <Ionicons name="attach" size={24} color="#8E8E93" />
+          </TouchableOpacity>
+
+          <TextInput
+            style={styles.input}
+            value={inputText}
+            onChangeText={setInputText}
+            placeholder="Message..."
+            placeholderTextColor="#8E8E93"
+            multiline
+            maxLength={4000}
+          />
+
+          <TouchableOpacity style={styles.voiceButton}>
+            <Ionicons name="mic-outline" size={24} color="#8E8E93" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
+            onPress={sendMessage}
+            disabled={!inputText.trim()}
+          >
+            <Ionicons name="arrow-up" size={20} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+function MessageBubble({ message }: { message: LocalMessage }) {
+  const isUser = message.role === 'user';
+
+  return (
+    <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleAssistant]}>
+      {isUser ? (
+        <Text style={styles.bubbleTextUser}>{message.content}</Text>
+      ) : (
+        <Markdown style={markdownStyles}>{message.content}</Markdown>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#FFF',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#000',
+  },
+  headerStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  headerStatusText: {
+    fontSize: 12,
+    color: '#8E8E93',
+  },
+  moreButton: {
+    padding: 8,
+  },
+  content: {
+    flex: 1,
+  },
+  messages: {
+    flex: 1,
+  },
+  messagesContent: {
+    padding: 16,
+    paddingBottom: 8,
+  },
+  bubble: {
+    maxWidth: '85%',
+    padding: 12,
+    borderRadius: 18,
+    marginBottom: 8,
+  },
+  bubbleUser: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#007AFF',
+    borderBottomRightRadius: 4,
+  },
+  bubbleAssistant: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#F2F2F7',
+    borderBottomLeftRadius: 4,
+  },
+  bubbleTextUser: {
+    fontSize: 16,
+    color: '#FFF',
+    lineHeight: 22,
+  },
+  typingIndicator: {
+    alignSelf: 'flex-start',
+    padding: 12,
+    backgroundColor: '#F2F2F7',
+    borderRadius: 18,
+  },
+  typingText: {
+    fontSize: 14,
+    color: '#8E8E93',
+    letterSpacing: 4,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    padding: 8,
+    paddingBottom: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E5EA',
+    backgroundColor: '#FFF',
+    gap: 8,
+  },
+  attachButton: {
+    padding: 8,
+  },
+  input: {
+    flex: 1,
+    fontSize: 16,
+    maxHeight: 100,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#F2F2F7',
+    borderRadius: 20,
+  },
+  voiceButton: {
+    padding: 8,
+  },
+  sendButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendButtonDisabled: {
+    backgroundColor: '#C7C7CC',
+  },
+});
+
+const markdownStyles = StyleSheet.create({
+  body: {
+    fontSize: 16,
+    color: '#000',
+    lineHeight: 22,
+  },
+  heading1: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 8,
+  },
+  heading2: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#000',
+    marginBottom: 6,
+  },
+  heading3: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000',
+    marginBottom: 4,
+  },
+  code_inline: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 14,
+    backgroundColor: '#E5E5EA',
+    paddingHorizontal: 4,
+    borderRadius: 4,
+  },
+  code_block: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 14,
+    backgroundColor: '#1C1C1E',
+    color: '#FFF',
+    padding: 12,
+    borderRadius: 8,
+    marginVertical: 8,
+  },
+  fence: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 14,
+    backgroundColor: '#1C1C1E',
+    color: '#FFF',
+    padding: 12,
+    borderRadius: 8,
+    marginVertical: 8,
+  },
+  blockquote: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#007AFF',
+    paddingLeft: 12,
+    marginVertical: 8,
+  },
+  bullet_list: {
+    marginVertical: 4,
+  },
+  ordered_list: {
+    marginVertical: 4,
+  },
+  link: {
+    color: '#007AFF',
+    textDecorationLine: 'underline',
+  },
+});
