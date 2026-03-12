@@ -1,7 +1,53 @@
+/**
+ * Fly.io Machines Container Management (Production)
+ * 
+ * Uses Fly.io Machines API for container orchestration.
+ * SECURITY: Only runs server-side via internalAction.
+ * 
+ * ═══════════════════════════════════════════════════════════════════
+ * FLY.IO ALTERNATIVES FOR PRODUCTION:
+ * ═══════════════════════════════════════════════════════════════════
+ * 
+ * 1. Railway (railway.app)
+ *    - Pros: Easier UX, similar pricing, instant deployments
+ *    - Cons: Less control over infrastructure
+ *    - Best for: Small to medium deployments, quick iteration
+ * 
+ * 2. Render (render.com)
+ *    - Pros: Free tier available, managed containers
+ *    - Cons: Slower cold starts, less region coverage
+ *    - Best for: Cost-conscious projects, testing
+ * 
+ * 3. Google Cloud Run
+ *    - Pros: Serverless containers, pay-per-use, scales to zero
+ *    - Cons: More complex setup, vendor lock-in
+ *    - Best for: Variable traffic, enterprise integrations
+ * 
+ * 4. AWS Fargate
+ *    - Pros: Full AWS integration, enterprise-grade
+ *    - Cons: Most complex, AWS-specific knowledge needed
+ *    - Best for: Existing AWS infrastructure
+ * 
+ * 5. Coolify (coolify.io)
+ *    - Pros: Self-hosted PaaS, full control, open source
+ *    - Cons: Requires own infrastructure, maintenance overhead
+ *    - Best for: Privacy-focused, cost optimization at scale
+ * 
+ * 6. Kubernetes (any provider)
+ *    - Pros: Fully portable, industry standard, maximum control
+ *    - Cons: Most complex, overkill for small projects
+ *    - Best for: Large-scale, multi-cloud strategies
+ * 
+ * MIGRATION PATH:
+ * To switch from Fly to any alternative, implement the same interface
+ * in a new file (e.g., railway.ts) and update containers.ts router.
+ * ═══════════════════════════════════════════════════════════════════
+ */
+
 import { v } from "convex/values";
-import { action, internalMutation } from "../_generated/server";
-import { internal } from "../_generated/api";
-import { Doc, Id } from "../_generated/dataModel";
+import { action, internalMutation, internalAction } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { Doc, Id } from "./_generated/dataModel";
 
 // Fly.io configuration
 const FLY_API_HOST = "https://api.machines.dev/v1";
@@ -104,21 +150,21 @@ export const createContainer = action({
       ZEROCLAW_API_KEY: apiKey,
       ZEROCLAW_PROVIDER: provider,
       ZEROCLAW_MODEL: model || "default",
-      
+
       // Agent metadata
       AGENT_ID: agentId,
       AGENT_NAME: name,
       AGENT_PERSONALITY: personalityPrompt,
       AGENT_SKILLS: skills.join(","),
-      
+
       // Gateway config
       ZEROCLAW_GATEWAY_PORT: "42617",
       ZEROCLAW_GATEWAY_HOST: "0.0.0.0",
-      
+
       // Memory backend
       ZEROCLAW_MEMORY_BACKEND: "sqlite",
       ZEROCLAW_MEMORY_AUTO_SAVE: "true",
-      
+
       // Autonomy level
       ZEROCLAW_AUTONOMY_LEVEL: "supervised",
       ZEROCLAW_WORKSPACE_ONLY: "true",

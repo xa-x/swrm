@@ -16,9 +16,6 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "ai.swrm.app",
-      "config": {
-        "usesNonExemptEncryption": false
-      },
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Allow Swrm to record voice messages for your agents."
       }
@@ -27,13 +24,10 @@
       "package": "ai.swrm.app",
       "adaptiveIcon": {
         "backgroundColor": "#000000",
-        "foregroundImage": "./images/android-icon-foreground.png",
-        "backgroundImage": "./images/android-icon-background.png",
-        "monochromeImage": "./images/android-icon-monochrome.png"
+        "foregroundImage": "./images/android-icon-foreground.png"
       },
       "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.VIBRATE"
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -47,18 +41,20 @@
       [
         "expo-notifications"
       ],
+      "expo-sqlite",
       "@clerk/expo"
     ],
-    "experiments": {
-      "typedRoutes": true
-    },
     "extra": {
-      "router": {
-        "origin": false
-      },
+      "clerkPublishableKey": "${EXPO_PUBLIC_CLERK_KEY}",
+      "apiUrl": "${EXPO_PUBLIC_API_URL}",
       "eas": {
         "projectId": "your-project-id"
       }
+    },
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true,
+      "autolinkingModuleResolution": true
     }
   }
 }

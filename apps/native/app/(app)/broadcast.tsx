@@ -3,13 +3,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '@clerk/clerk-expo';
-import { useAgents } from '../../lib/hooks';
+import { useAuth } from '@clerk/expo';
+import { useAgents } from '@/lib/hooks';
 
 export default function BroadcastScreen() {
   const { userId } = useAuth();
   const agents = useAgents(userId);
-  
+
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -57,7 +57,7 @@ export default function BroadcastScreen() {
     setResults(new Map());
 
     const agentIds = Array.from(selectedAgents);
-    
+
     // Initialize all as pending
     const initial = new Map<string, { status: 'pending' | 'sent' | 'error'; response?: string }>();
     agentIds.forEach(id => initial.set(id, { status: 'pending' }));

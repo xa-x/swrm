@@ -4,8 +4,8 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
-import { useAgent, useChatHistory, useSendMessage } from '../../../lib/hooks';
-import { messagesDb, sessionsDb } from '../../../lib/db';
+import { useAgent, useChatHistory, useSendMessage } from '@/lib/hooks';
+import { messagesDb, sessionsDb } from '@/lib/db';
 
 export default function ChatScreen() {
   const { id: agentId } = useLocalSearchParams<{ id: string }>();
@@ -91,7 +91,7 @@ export default function ChatScreen() {
           <Text style={styles.headerTitle}>{agent.name}</Text>
           <View style={styles.headerStatus}>
             <View style={[
-              styles.statusDot, 
+              styles.statusDot,
               { backgroundColor: agent.status === 'running' ? '#34C759' : '#8E8E93' }
             ]} />
             <Text style={styles.headerStatusText}>
@@ -100,8 +100,8 @@ export default function ChatScreen() {
           </View>
         </View>
 
-        <TouchableOpacity 
-          style={styles.moreButton} 
+        <TouchableOpacity
+          style={styles.moreButton}
           onPress={() => router.push(`/agent/${agentId}`)}
         >
           <Ionicons name="ellipsis-horizontal" size={24} color="#007AFF" />
@@ -163,7 +163,7 @@ export default function ChatScreen() {
 
           <TouchableOpacity
             style={[
-              styles.sendButton, 
+              styles.sendButton,
               !inputText.trim() && styles.sendButtonDisabled
             ]}
             onPress={handleSend}

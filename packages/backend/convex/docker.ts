@@ -1,305 +1,405 @@
+/**
+ * Docker Engine Container Management (Development)
+ * 
+ * Uses Docker socket for local container orchestration.
+ * SECURITY: Only runs server-side via internalAction.
+ * 
+ * SHARED VOLUME: All containers mount `swrm-shared` at /workspace
+ * for agent file sharing (code, data, artifacts).
+ */
+
 import { v } from "convex/values";
-import { action, internalMutation } from "./_generated/server";
+import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 
-// Fly.io configuration
-const FLY_API_HOST = "https://api.machines.dev/v1";
-const FLY_APP_NAME = process.env.FLY_APP_NAME || "swrm-agents";
-const FLY_API_TOKEN = process.env.FLY_API_TOKEN || "";
+// Docker configuration
+const DOCKER_HOST = process.env.DOCKER_HOST || "http://localhost";
+const DOCKER_PORT = process.env.DOCKER_PORT || "2375";
+const DOCKER_SOCKET = process.env.DOCKER_SOCKET || "/var/run/docker.sock";
 
 // ZeroClaw image
 const ZEROCLAW_IMAGE = "ghcr.io/zeroclaw-labs/zeroclaw:latest";
 
-// Region mapping
-const REGIONS: Record<string, string> = {
-  auto: "iad",      // US East (default)
-  "us-east": "iad",
-  "us-west": "sea",
-  "eu-west": "fra",
-  "ap-southeast": "sin",
-};
+// Shared volume for agent workspace
+const SHARED_VOLUME = "swrm-shared";
 
-interface FlyMachineResponse {
-  id: string;
-  name: string;
-  state: string;
-  region: string;
-  config: {
-    env: Record<string, string>;
-    image: string;
-  };
+// Gateway port inside container
+const GATEWAY_PORT = 42617;
+
+interface DockerContainerResponse {
+  Id: string;
+  Names: string[];
+  State: string;
+  Status: string;
+  Ports: Array<{
+    PrivatePort: number;
+    PublicPort: number;
+    Type: string;
+  }>;
 }
 
-// ============ ACTIONS (HTTP calls to Fly.io) ============
+/**
+ * Call Docker API via HTTP
+ */
+async function dockerApi(
+  endpoint: string,
+  method: "GET" | "POST" | "DELETE" = "GET",
+  body?: object
+): Promise<any> {
+  const url = `${DOCKER_HOST}:${DOCKER_PORT}${endpoint}`;
+  
+  const response = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
 
-// Create container on Fly.io
-export const createContainer = action({
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Docker API error: ${error}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Ensure shared volume exists
+ */
+async function ensureSharedVolume(): Promise<void> {
+  try {
+    const volumes = await dockerApi("/volumes");
+    const exists = volumes.Volumes?.some((v: any) => v.Name === SHARED_VOLUME);
+    
+    if (!exists) {
+      await dockerApi("/volumes/create", "POST", {
+        Name: SHARED_VOLUME,
+        Labels: {
+          "ai.swrm.managed": "true",
+          "ai.swrm.purpose": "agent-workspace",
+        },
+      });
+      console.log(`✅ Created shared volume: ${SHARED_VOLUME}`);
+    }
+  } catch (error) {
+    console.error("Failed to ensure shared volume:", error);
+    // Continue anyway - volume mount will fail if truly missing
+  }
+}
+
+/**
+ * Create a container for an agent
+ */
+export const createContainer = internalAction({
   args: {
     agentId: v.id("agents"),
+    userId: v.string(),
+    name: v.string(),
     provider: v.string(),
     apiKey: v.string(),
     model: v.optional(v.string()),
     personality: v.string(),
+    customPersonality: v.optional(v.string()),
     skills: v.array(v.string()),
-    region: v.string(),
+    region: v.optional(v.string()),
   },
-  handler: async (ctx, args): Promise<{ machineId: string; port: number }> => {
-    const region = REGIONS[args.region] || "iad";
-    const machineName = `swrm-${args.agentId.slice(0, 8)}`;
+  handler: async (ctx, args): Promise<{ containerId: string; port: number }> => {
+    const {
+      agentId,
+      userId,
+      name,
+      provider,
+      apiKey,
+      model,
+      personality,
+      customPersonality,
+      skills,
+    } = args;
 
-    // Build ZeroClaw config
-    const personalityPrompt = getPersonalityPrompt(args.personality);
-    const configToml = `
-api_key = "${args.apiKey}"
-default_provider = "${args.provider}"
-${args.model ? `default_model = "${args.model}"` : ''}
+    // Ensure shared volume exists
+    await ensureSharedVolume();
 
-[memory]
-backend = "sqlite"
-auto_save = true
+    // Container name (Docker requires lowercase, alphanumeric, hyphens)
+    const containerName = `swrm-agent-${agentId.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
 
-[autonomy]
-level = "supervised"
-workspace_only = true
+    // Build personality prompt
+    const personalityPrompt = getPersonalityPrompt(personality, customPersonality);
 
-[gateway]
-port = 42617
-host = "0.0.0.0"
+    // Build environment variables
+    const env: string[] = [
+      `ZEROCLAW_API_KEY=${apiKey}`,
+      `ZEROCLAW_PROVIDER=${provider}`,
+      `ZEROCLAW_MODEL=${model || "default"}`,
+      `AGENT_ID=${agentId}`,
+      `AGENT_NAME=${name}`,
+      `AGENT_PERSONALITY=${personalityPrompt}`,
+      `AGENT_SKILLS=${skills.join(",")}`,
+      `ZEROCLAW_GATEWAY_PORT=${GATEWAY_PORT}`,
+      `ZEROCLAW_GATEWAY_HOST=0.0.0.0`,
+      `ZEROCLAW_MEMORY_BACKEND=sqlite`,
+      `ZEROCLAW_MEMORY_AUTO_SAVE=true`,
+      `ZEROCLAW_AUTONOMY_LEVEL=supervised`,
+      `ZEROCLAW_WORKSPACE_ONLY=true`,
+    ];
 
-# Skills: ${args.skills.join(', ')}
-# Personality: ${personalityPrompt}
-    `.trim();
+    if (customPersonality) {
+      env.push(`AGENT_CUSTOM_PERSONALITY=${customPersonality}`);
+    }
 
-    // Create machine via Fly.io API
-    const response = await fetch(`${FLY_API_HOST}/apps/${FLY_APP_NAME}/machines`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${FLY_API_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: machineName,
-        region,
-        config: {
-          image: ZEROCLAW_IMAGE,
-          env: {
-            ZEROCLAW_API_KEY: args.apiKey,
-            ZEROCLAW_PROVIDER: args.provider,
-            ZEROCLAW_MODEL: args.model || "default",
-            ZEROCLAW_CONFIG: configToml,
+    try {
+      // Pull image first (if not present)
+      // Note: In production, pre-pull this image
+      
+      // Create container
+      const response = await dockerApi("/containers/create", "POST", {
+        name: containerName,
+        Image: ZEROCLAW_IMAGE,
+        Env: env,
+        ExposedPorts: {
+          [`${GATEWAY_PORT}/tcp`]: {},
+        },
+        HostConfig: {
+          PortBindings: {
+            [`${GATEWAY_PORT}/tcp`]: [{ HostPort: "0" }], // Random port assignment
           },
-          guest: {
-            cpu_kind: "shared",
-            cpus: 1,
-            memory_mb: 512,
-          },
-          services: [
-            {
-              ports: [
-                { port: 42617, handlers: ["http"] },
-              ],
-            },
+          Binds: [
+            `${SHARED_VOLUME}:/workspace:rw`, // Shared workspace
           ],
-          metadata: {
-            agent_id: args.agentId,
-            managed_by: "swrm",
+          RestartPolicy: {
+            Name: "on-failure",
+            MaximumRetryCount: 3,
           },
-          auto_destroy: false,
-          restart: {
-            policy: "on-failure",
-            max_retries: 3,
+          Resources: {
+            Memory: 512 * 1024 * 1024, // 512MB
+            NanoCpus: 1e9, // 1 CPU
           },
         },
-      }),
-    });
+        Labels: {
+          "ai.swrm.managed": "true",
+          "ai.swrm.agentId": agentId,
+          "ai.swrm.userId": userId,
+        },
+      });
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error("Fly.io error:", error);
-      throw new Error(`Failed to create machine: ${error}`);
+      const containerId = response.Id;
+
+      // Start container
+      await dockerApi(`/containers/${containerId}/start`, "POST");
+
+      // Get assigned port
+      const inspect = await dockerApi(`/containers/${containerId}/json`);
+      const port = inspect.NetworkSettings?.Ports?.[`${GATEWAY_PORT}/tcp`]?.[0]?.HostPort || GATEWAY_PORT;
+
+      // Update agent status
+      await ctx.runMutation(internal.agents.updateStatus, {
+        agentId,
+        status: "running",
+        containerId,
+      });
+
+      // Log action
+      await ctx.runMutation(internal.actions.log, {
+        agentId,
+        action: "container_created",
+        details: {
+          containerId,
+          containerName,
+          port,
+          volume: SHARED_VOLUME,
+        },
+      });
+
+      console.log(`✅ Docker container created: ${containerId} for agent ${agentId}`);
+
+      return { containerId, port: parseInt(port) };
+    } catch (error: any) {
+      console.error("Failed to create container:", error);
+
+      // Update agent status to error
+      await ctx.runMutation(internal.agents.updateStatus, {
+        agentId,
+        status: "error",
+      });
+
+      // Log error
+      await ctx.runMutation(internal.actions.log, {
+        agentId,
+        action: "container_error",
+        details: { error: error.message },
+      });
+
+      throw error;
     }
-
-    const machine: FlyMachineResponse = await response.json();
-
-    // Update agent with machine ID
-    await ctx.runMutation(internal.agents.updateStatus, {
-      agentId: args.agentId,
-      status: "running",
-      flyMachineId: machine.id,
-    });
-
-    // Log action
-    await ctx.runMutation(internal.actions.log, {
-      agentId: args.agentId,
-      action: "container_created",
-      details: { 
-        machineId: machine.id, 
-        region,
-        port: 42617,
-      },
-    });
-
-    return { machineId: machine.id, port: 42617 };
   },
 });
 
-// Start machine
-export const startMachine = action({
-  args: { machineId: v.string() },
-  handler: async (ctx, { machineId }) => {
-    const response = await fetch(
-      `${FLY_API_HOST}/apps/${FLY_APP_NAME}/machines/${machineId}/start`,
-      {
+/**
+ * Start a stopped container
+ */
+export const startContainer = internalAction({
+  args: {
+    containerId: v.string(),
+    agentId: v.id("agents"),
+  },
+  handler: async (ctx, { containerId, agentId }) => {
+    try {
+      await dockerApi(`/containers/${containerId}/start`, "POST");
+
+      await ctx.runMutation(internal.actions.log, {
+        agentId,
+        action: "container_started",
+        details: { containerId },
+      });
+
+      return { success: true };
+    } catch (error: any) {
+      throw new Error(`Failed to start container: ${error.message}`);
+    }
+  },
+});
+
+/**
+ * Stop a running container
+ */
+export const stopContainer = internalAction({
+  args: {
+    containerId: v.string(),
+    agentId: v.id("agents"),
+  },
+  handler: async (ctx, { containerId, agentId }) => {
+    try {
+      await dockerApi(`/containers/${containerId}/stop`, "POST");
+
+      await ctx.runMutation(internal.actions.log, {
+        agentId,
+        action: "container_stopped",
+        details: { containerId },
+      });
+
+      return { success: true };
+    } catch (error: any) {
+      throw new Error(`Failed to stop container: ${error.message}`);
+    }
+  },
+});
+
+/**
+ * Remove a container
+ */
+export const removeContainer = internalAction({
+  args: {
+    containerId: v.string(),
+    agentId: v.id("agents"),
+  },
+  handler: async (ctx, { containerId, agentId }) => {
+    try {
+      // Stop first if running
+      await dockerApi(`/containers/${containerId}/stop?t=5`, "POST").catch(() => {});
+      
+      // Remove container
+      await dockerApi(`/containers/${containerId}?force=true`, "DELETE");
+
+      await ctx.runMutation(internal.actions.log, {
+        agentId,
+        action: "container_removed",
+        details: { containerId },
+      });
+
+      return { success: true };
+    } catch (error: any) {
+      throw new Error(`Failed to remove container: ${error.message}`);
+    }
+  },
+});
+
+/**
+ * Get container status
+ */
+export const getContainerStatus = internalAction({
+  args: {
+    containerId: v.string(),
+  },
+  handler: async (ctx, { containerId }) => {
+    try {
+      const inspect = await dockerApi(`/containers/${containerId}/json`);
+
+      return {
+        status: inspect.State.Status,
+        running: inspect.State.Running,
+        port: inspect.NetworkSettings?.Ports?.[`${GATEWAY_PORT}/tcp`]?.[0]?.HostPort,
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to get container status: ${error.message}`);
+    }
+  },
+});
+
+/**
+ * Call agent via HTTP
+ * Routes to container's gateway port
+ */
+export const callAgent = internalAction({
+  args: {
+    containerId: v.string(),
+    message: v.string(),
+    agentId: v.id("agents"),
+  },
+  handler: async (ctx, { containerId, message, agentId }) => {
+    // Get container's port mapping
+    const inspect = await dockerApi(`/containers/${containerId}/json`);
+    const port = inspect.NetworkSettings?.Ports?.[`${GATEWAY_PORT}/tcp`]?.[0]?.HostPort;
+
+    if (!port) {
+      throw new Error("Container port not mapped");
+    }
+
+    const agentUrl = `http://localhost:${port}/agent`;
+
+    try {
+      const response = await fetch(agentUrl, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${FLY_API_TOKEN}`,
+          "Content-Type": "application/json",
         },
-      }
-    );
+        body: JSON.stringify({ message }),
+        signal: AbortSignal.timeout(30000), // 30 second timeout
+      });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Failed to start machine: ${error}`);
+      if (!response.ok) {
+        throw new Error(`Agent error: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const outputTokens = Math.ceil((data.response || data.message || "").length / 4);
+
+      return {
+        content: data.response || data.message || "",
+        outputTokens,
+      };
+    } catch (error: any) {
+      if (error.message?.includes("ECONNREFUSED") || error.message?.includes("timeout")) {
+        throw new Error("Agent is not responding. It may be stopped or starting.");
+      }
+      throw error;
     }
-
-    return { success: true };
   },
 });
 
-// Stop machine
-export const stopMachine = action({
-  args: { machineId: v.string() },
-  handler: async (ctx, { machineId }) => {
-    const response = await fetch(
-      `${FLY_API_HOST}/apps/${FLY_APP_NAME}/machines/${machineId}/stop`,
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${FLY_API_TOKEN}`,
-        },
-      }
-    );
+/**
+ * Helper: Get personality prompt
+ */
+function getPersonalityPrompt(personality: string, custom?: string): string {
+  if (custom) return custom;
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Failed to stop machine: ${error}`);
-    }
-
-    return { success: true };
-  },
-});
-
-// Restart machine
-export const restartMachine = action({
-  args: { machineId: v.string() },
-  handler: async (ctx, { machineId }) => {
-    // Stop then start
-    await fetch(
-      `${FLY_API_HOST}/apps/${FLY_APP_NAME}/machines/${machineId}/stop`,
-      {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${FLY_API_TOKEN}` },
-      }
-    );
-
-    // Wait a moment
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    await fetch(
-      `${FLY_API_HOST}/apps/${FLY_APP_NAME}/machines/${machineId}/start`,
-      {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${FLY_API_TOKEN}` },
-      }
-    );
-
-    return { success: true };
-  },
-});
-
-// Get machine status
-export const getMachineStatus = action({
-  args: { machineId: v.string() },
-  handler: async (ctx, { machineId }) => {
-    const response = await fetch(
-      `${FLY_API_HOST}/apps/${FLY_APP_NAME}/machines/${machineId}`,
-      {
-        headers: {
-          "Authorization": `Bearer ${FLY_API_TOKEN}`,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error("Failed to get machine status");
-    }
-
-    const machine: FlyMachineResponse = await response.json();
-    
-    return {
-      status: machine.state,
-      region: machine.region,
-      image: machine.config.image,
-    };
-  },
-});
-
-// Get machine logs
-export const getMachineLogs = action({
-  args: { 
-    machineId: v.string(),
-    tail: v.optional(v.number()),
-  },
-  handler: async (ctx, { machineId, tail = 100 }) => {
-    const response = await fetch(
-      `${FLY_API_HOST}/apps/${FLY_APP_NAME}/machines/${machineId}/logs?tail=${tail}`,
-      {
-        headers: {
-          "Authorization": `Bearer ${FLY_API_TOKEN}`,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error("Failed to get logs");
-    }
-
-    const logs = await response.text();
-    return { logs };
-  },
-});
-
-// Destroy machine
-export const destroyMachine = action({
-  args: { machineId: v.string() },
-  handler: async (ctx, { machineId }) => {
-    const response = await fetch(
-      `${FLY_API_HOST}/apps/${FLY_APP_NAME}/machines/${machineId}`,
-      {
-        method: "DELETE",
-        headers: {
-          "Authorization": `Bearer ${FLY_API_TOKEN}`,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Failed to destroy machine: ${error}`);
-    }
-
-    return { success: true };
-  },
-});
-
-// ============ HELPERS ============
-
-function getPersonalityPrompt(personality: string): string {
   const prompts: Record<string, string> = {
-    professional: "You are a professional assistant. Be thorough, accurate, and formal.",
-    friendly: "You are a friendly assistant. Be warm, approachable, and conversational.",
+    professional:
+      "You are a professional assistant. Be thorough, accurate, and formal.",
+    friendly:
+      "You are a friendly assistant. Be warm, approachable, and conversational.",
     concise: "You are a direct assistant. Be brief, to the point, no fluff.",
-    creative: "You are a creative assistant. Think outside the box, offer unique perspectives.",
+    creative:
+      "You are a creative assistant. Think outside the box, offer unique perspectives.",
   };
 
   return prompts[personality] || prompts.professional;

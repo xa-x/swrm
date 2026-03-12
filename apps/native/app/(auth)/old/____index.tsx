@@ -1,14 +1,14 @@
 import { StyleSheet, View, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useAuth, SignIn } from '@clerk/clerk-expo';
+import { useAuth, SignIn } from '@clerk/expo';
 
 export default function AuthScreen() {
   const { isSignedIn } = useAuth();
   const router = useRouter();
 
   if (isSignedIn) {
-    router.replace('/');
+    router.replace('/(app)');
     return null;
   }
 
@@ -21,9 +21,9 @@ export default function AuthScreen() {
           <Text style={styles.subtitle}>Deploy AI agents. Swarm together.</Text>
         </View>
 
-        <View style={styles.auth}>
+        {/*<View style={styles.auth}>
           <SignIn routing="hash" />
-        </View>
+        </View>*/}
       </View>
     </SafeAreaView>
   );

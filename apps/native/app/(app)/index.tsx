@@ -3,9 +3,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useEffect, useCallback, useState } from 'react';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '@clerk/clerk-expo';
-import { useAgents } from '../../lib/hooks';
-import { agentsDb, LocalAgent, AgentStatus } from '../../lib/db';
+import { useAuth } from '@clerk/expo';
+import { useAgents } from '@/lib/hooks';
+import { agentsDb, LocalAgent, AgentStatus } from '@/lib/db';
 
 export default function HomeScreen() {
   const { userId } = useAuth();
@@ -69,6 +69,7 @@ export default function HomeScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.loading}>
           <ActivityIndicator size="large" />
+          <Text> Loading state  </Text>
         </View>
       </SafeAreaView>
     );
@@ -127,7 +128,7 @@ export default function HomeScreen() {
 
 function AgentCard({ agent, onPress }: { agent: any; onPress: () => void }) {
   const status = agent.status as AgentStatus;
-  
+
   const statusColor = {
     creating: '#FF9500',
     running: '#34C759',

@@ -1,10 +1,23 @@
+/**
+ * Chat API
+ * 
+ * Handles messaging between users and agents.
+ * Routes to Docker (dev) or Fly (prod) via containers module.
+ * 
+ * SECURITY: All mutations check authentication.
+ */
+
 import { v } from "convex/values";
-import { mutation, query, action } from "./_generated/server";
+import { mutation, query, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { getContainerApi } from "./containers";
 
 // ============ QUERIES ============
 
-// Get messages for a session
+/**
+ * Get messages for a session
+ * SECURITY: Only returns messages for agents owned by the user
+ */
 export const getHistory = query({
   args: {
     agentId: v.id("agents"),
@@ -12,6 +25,18 @@ export const getHistory = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, { agentId, sessionId, limit = 100 }) => {
+    // Verify user owns this agent
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Please sign in");
+    }
+
+    const agent = await ctx.db.get(agentId);
+    if (!agent || agent.userId !== identity.subject) {
+      throw new Error("Unauthorized: Agent not found");
+    }
+
+    // Query messages
     let query = ctx.db
       .query("messages")
       .withIndex("by_agent", (q) => q.eq("agentId", agentId));
@@ -28,7 +53,10 @@ export const getHistory = query({
 
 // ============ MUTATIONS ============
 
-// Send message to agent (REST API)
+/**
+ * Send message to agent
+ * Routes to appropriate container backend (Docker/Fly)
+ */
 export const send = mutation({
   args: {
     agentId: v.id("agents"),
@@ -36,10 +64,21 @@ export const send = mutation({
     content: v.string(),
   },
   handler: async (ctx, args) => {
+    // SECURITY: Verify authentication
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Please sign in");
+    }
+
     const agent = await ctx.db.get(args.agentId);
     
     if (!agent) {
       throw new Error("Agent not found");
+    }
+
+    // SECURITY: Verify ownership
+    if (agent.userId !== identity.subject) {
+      throw new Error("Unauthorized: Not your agent");
     }
 
     if (agent.status !== "running") {
@@ -61,11 +100,20 @@ export const send = mutation({
     // Estimate input tokens
     const inputTokens = Math.ceil(args.content.length / 4);
 
-    // Call ZeroClaw via HTTP (async action)
-    const response = await ctx.scheduler.runAfter(0, internal.http.callAgent, {
-      agentId: args.agentId,
-      machineId: agent.flyMachineId!,
+    // Get container/VM identifier
+    // Docker uses containerId, Fly uses flyMachineId
+    const containerRef = agent.containerId || agent.flyMachineId;
+    
+    if (!containerRef) {
+      throw new Error("Agent has no running container");
+    }
+
+    // Call agent via containers module (routes to Docker/Fly)
+    const containerApi = getContainerApi();
+    const response = await ctx.scheduler.runAfter(0, containerApi.callAgent, {
+      containerId: containerRef,
       message: args.content,
+      agentId: args.agentId,
     });
 
     // Store assistant message
@@ -99,8 +147,32 @@ export const send = mutation({
   },
 });
 
+// ============ INTERNAL MUTATIONS ============
+
+/**
+ * Log chat action (internal use)
+ */
+export const logAction = internalMutation({
+  args: {
+    agentId: v.id("agents"),
+    action: v.string(),
+    details: v.any(),
+  },
+  handler: async (ctx, { agentId, action, details }) => {
+    await ctx.db.insert("actions", {
+      agentId,
+      action,
+      details,
+      createdAt: Date.now(),
+    });
+  },
+});
+
 // ============ HELPERS ============
 
+/**
+ * Calculate cost based on provider and token usage
+ */
 function calculateCost(
   provider: string,
   inputTokens: number,

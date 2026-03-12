@@ -3,11 +3,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '@clerk/clerk-expo';
-import { useCreateAgent } from '../../lib/hooks';
-import { secureStorage } from '../../lib/storage';
-import { ProgressIndicator } from '../../components/ProgressIndicator';
-import { ErrorRecovery } from '../../components/ErrorRecovery';
+import { useAuth } from '@clerk/expo';
+import { useCreateAgent } from '@/lib/hooks';
+import { secureStorage } from '@/lib/storage';
+import { ProgressIndicator } from '@/components/ProgressIndicator';
+import { ErrorRecovery } from '@/components/ErrorRecovery';
 
 const PROVIDERS = [
   { id: 'openai', name: 'OpenAI', icon: '🔮', models: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
@@ -44,7 +44,7 @@ export default function CreateAgentScreen() {
   const [model, setModel] = useState('');
   const [personality, setPersonality] = useState('friendly');
   const [skills, setSkills] = useState<string[]>([]);
-  
+
   // Creation state
   const [isCreating, setIsCreating] = useState(false);
   const [createStatus, setCreateStatus] = useState<'creating' | 'pulling' | 'starting' | 'running' | 'error'>('creating');
@@ -72,8 +72,8 @@ export default function CreateAgentScreen() {
   };
 
   const toggleSkill = (skillId: string) => {
-    setSkills(prev => 
-      prev.includes(skillId) 
+    setSkills(prev =>
+      prev.includes(skillId)
         ? prev.filter(s => s !== skillId)
         : [...prev, skillId]
     );
@@ -122,7 +122,7 @@ export default function CreateAgentScreen() {
       setTimeout(() => {
         setCreateStatus('running');
         setCreateProgress(100);
-        
+
         // Go back after success
         setTimeout(() => {
           router.back();
@@ -149,13 +149,13 @@ export default function CreateAgentScreen() {
       {/* Progress */}
       <View style={styles.progress}>
         {[0, 1, 2, 3].map(i => (
-          <View 
-            key={i} 
+          <View
+            key={i}
             style={[
-              styles.progressDot, 
+              styles.progressDot,
               i <= step && styles.progressDotActive,
               i === step && styles.progressDotCurrent,
-            ]} 
+            ]}
           />
         ))}
       </View>
@@ -313,8 +313,8 @@ export default function CreateAgentScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             {createStatus !== 'error' ? (
-              <ProgressIndicator 
-                status={createStatus} 
+              <ProgressIndicator
+                status={createStatus}
                 progress={createProgress}
               />
             ) : (

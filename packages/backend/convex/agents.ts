@@ -1,14 +1,38 @@
+/**
+ * Agent Management API
+ * 
+ * SECURITY: All mutations verify authentication and ownership.
+ * Queries filter by authenticated user.
+ * 
+ * Container operations route via containers.ts to Docker (dev) or Fly (prod).
+ */
+
 import { v } from "convex/values";
-import { mutation, query, action } from "./_generated/server";
+import { mutation, query, internalMutation } from "./_generated/server";
 import { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
+import { getContainerApi, USE_DOCKER_BACKEND } from "./containers";
 
 // ============ QUERIES ============
 
-// Get all agents for a user (real-time subscription)
+/**
+ * Get all agents for a user (real-time subscription)
+ * SECURITY: Only returns agents owned by the authenticated user
+ */
 export const list = query({
   args: { userId: v.string() },
   handler: async (ctx, { userId }) => {
+    // SECURITY: Verify identity
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Please sign in");
+    }
+
+    // SECURITY: Only return user's own agents
+    if (userId !== identity.subject) {
+      throw new Error("Unauthorized: Cannot access other users' agents");
+    }
+
     return await ctx.db
       .query("agents")
       .withIndex("by_user", (q) => q.eq("userId", userId))
@@ -17,20 +41,44 @@ export const list = query({
   },
 });
 
-// Get single agent
+/**
+ * Get single agent
+ * SECURITY: Only returns if owned by authenticated user
+ */
 export const get = query({
   args: { agentId: v.id("agents") },
   handler: async (ctx, { agentId }) => {
-    return await ctx.db.get(agentId);
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Please sign in");
+    }
+
+    const agent = await ctx.db.get(agentId);
+    
+    if (!agent || agent.userId !== identity.subject) {
+      throw new Error("Agent not found");
+    }
+
+    return agent;
   },
 });
 
-// Get agent status (for polling)
+/**
+ * Get agent status (for polling)
+ */
 export const getStatus = query({
   args: { agentId: v.id("agents") },
   handler: async (ctx, { agentId }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized");
+    }
+
     const agent = await ctx.db.get(agentId);
-    if (!agent) return null;
+    if (!agent || agent.userId !== identity.subject) {
+      return null;
+    }
+
     return {
       status: agent.status,
       containerId: agent.containerId,
@@ -39,13 +87,25 @@ export const getStatus = query({
   },
 });
 
-// Get agent actions (audit log)
+/**
+ * Get agent actions (audit log)
+ */
 export const getActions = query({
   args: { 
     agentId: v.id("agents"),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, { agentId, limit = 50 }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized");
+    }
+
+    const agent = await ctx.db.get(agentId);
+    if (!agent || agent.userId !== identity.subject) {
+      throw new Error("Agent not found");
+    }
+
     return await ctx.db
       .query("actions")
       .withIndex("by_agent", (q) => q.eq("agentId", agentId))
@@ -56,7 +116,13 @@ export const getActions = query({
 
 // ============ MUTATIONS ============
 
-// Create agent
+/**
+ * Create agent
+ * SECURITY: Uses authenticated user's ID, ignores provided userId
+ * 
+ * TODO: API key encryption - base64 is NOT secure encryption!
+ * Use Convex secrets or an external KMS in production.
+ */
 export const create = mutation({
   args: {
     userId: v.string(),
@@ -72,14 +138,22 @@ export const create = mutation({
     region: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // SECURITY: Get authenticated user
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Please sign in");
+    }
+
+    // SECURITY: Always use authenticated user's ID
+    const userId = identity.subject;
     const now = Date.now();
     
-    // Encrypt API key (in production, use a proper encryption service)
-    // For now, we'll store it (TODO: use Convex secrets or external encryption)
+    // TODO: Use proper encryption for API keys
+    // WARNING: base64 is NOT encryption, just encoding
     const encryptedApiKey = Buffer.from(args.apiKey).toString('base64');
     
     const agentId = await ctx.db.insert("agents", {
-      userId: args.userId,
+      userId, // Use authenticated user ID
       name: args.name,
       icon: args.icon || "🤖",
       provider: args.provider,
@@ -100,17 +174,21 @@ export const create = mutation({
       agentId,
       action: "create",
       details: { provider: args.provider },
-      triggeredBy: "user",
+      triggeredBy: userId,
       createdAt: now,
     });
 
-    // Start container (async action)
-    await ctx.scheduler.runAfter(0, internal.docker.createContainer, {
+    // Start container via containers module (routes to Docker/Fly)
+    const containerApi = getContainerApi();
+    await ctx.scheduler.runAfter(0, containerApi.createContainer, {
       agentId,
+      userId,
+      name: args.name,
       provider: args.provider,
       apiKey: args.apiKey,
       model: args.model,
       personality: args.personality,
+      customPersonality: args.customPersonality,
       skills: args.skills,
       region: args.region || "auto",
     });
@@ -119,7 +197,9 @@ export const create = mutation({
   },
 });
 
-// Update agent
+/**
+ * Update agent
+ */
 export const update = mutation({
   args: {
     agentId: v.id("agents"),
@@ -130,10 +210,15 @@ export const update = mutation({
     budgetLimit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Please sign in");
+    }
+
     const { agentId, ...updates } = args;
     const agent = await ctx.db.get(agentId);
     
-    if (!agent) {
+    if (!agent || agent.userId !== identity.subject) {
       throw new Error("Agent not found");
     }
 
@@ -146,7 +231,7 @@ export const update = mutation({
       agentId,
       action: "update",
       details: updates,
-      triggeredBy: "user",
+      triggeredBy: identity.subject,
       createdAt: Date.now(),
     });
 
@@ -154,21 +239,30 @@ export const update = mutation({
   },
 });
 
-// Delete agent
+/**
+ * Delete agent
+ */
 export const remove = mutation({
   args: { agentId: v.id("agents") },
   handler: async (ctx, { agentId }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Please sign in");
+    }
+
     const agent = await ctx.db.get(agentId);
     
-    if (!agent) {
+    if (!agent || agent.userId !== identity.subject) {
       throw new Error("Agent not found");
     }
 
-    // Stop container first
-    if (agent.flyMachineId) {
-      await ctx.scheduler.runAfter(0, internal.docker.stopContainer, {
+    // Stop/remove container via containers module
+    const containerRef = agent.containerId || agent.flyMachineId;
+    const containerApi = getContainerApi();
+    if (containerRef) {
+      await ctx.scheduler.runAfter(0, containerApi.removeContainer, {
+        containerId: containerRef,
         agentId,
-        machineId: agent.flyMachineId,
       });
     }
 
@@ -177,7 +271,7 @@ export const remove = mutation({
       agentId,
       action: "delete",
       details: {},
-      triggeredBy: "user",
+      triggeredBy: identity.subject,
       createdAt: Date.now(),
     });
 
@@ -190,13 +284,20 @@ export const remove = mutation({
 
 // ============ CONTAINER ACTIONS ============
 
-// Start agent
+/**
+ * Start agent
+ */
 export const start = mutation({
   args: { agentId: v.id("agents") },
   handler: async (ctx, { agentId }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized");
+    }
+
     const agent = await ctx.db.get(agentId);
     
-    if (!agent) {
+    if (!agent || agent.userId !== identity.subject) {
       throw new Error("Agent not found");
     }
 
@@ -209,14 +310,17 @@ export const start = mutation({
       agentId,
       action: "start",
       details: {},
-      triggeredBy: "user",
+      triggeredBy: identity.subject,
       createdAt: Date.now(),
     });
 
-    // Call Fly.io to start machine
-    if (agent.flyMachineId) {
-      await ctx.scheduler.runAfter(0, internal.docker.startMachine, {
-        machineId: agent.flyMachineId,
+    // Start container via containers module
+    const containerRef = agent.containerId || agent.flyMachineId;
+    const containerApi = getContainerApi();
+    if (containerRef) {
+      await ctx.scheduler.runAfter(0, containerApi.startContainer, {
+        containerId: containerRef,
+        agentId,
       });
     }
 
@@ -224,13 +328,20 @@ export const start = mutation({
   },
 });
 
-// Stop agent (graceful)
+/**
+ * Stop agent (graceful)
+ */
 export const stop = mutation({
   args: { agentId: v.id("agents") },
   handler: async (ctx, { agentId }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized");
+    }
+
     const agent = await ctx.db.get(agentId);
     
-    if (!agent) {
+    if (!agent || agent.userId !== identity.subject) {
       throw new Error("Agent not found");
     }
 
@@ -243,14 +354,17 @@ export const stop = mutation({
       agentId,
       action: "stop",
       details: {},
-      triggeredBy: "user",
+      triggeredBy: identity.subject,
       createdAt: Date.now(),
     });
 
-    // Call Fly.io to stop machine
-    if (agent.flyMachineId) {
-      await ctx.scheduler.runAfter(0, internal.docker.stopMachine, {
-        machineId: agent.flyMachineId,
+    // Stop container via containers module
+    const containerRef = agent.containerId || agent.flyMachineId;
+    const containerApi = getContainerApi();
+    if (containerRef) {
+      await ctx.scheduler.runAfter(0, containerApi.stopContainer, {
+        containerId: containerRef,
+        agentId,
       });
     }
 
@@ -258,13 +372,20 @@ export const stop = mutation({
   },
 });
 
-// Restart agent (force)
+/**
+ * Restart agent (force)
+ */
 export const restart = mutation({
   args: { agentId: v.id("agents") },
   handler: async (ctx, { agentId }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized");
+    }
+
     const agent = await ctx.db.get(agentId);
     
-    if (!agent) {
+    if (!agent || agent.userId !== identity.subject) {
       throw new Error("Agent not found");
     }
 
@@ -277,14 +398,21 @@ export const restart = mutation({
       agentId,
       action: "restart",
       details: { force: true },
-      triggeredBy: "user",
+      triggeredBy: identity.subject,
       createdAt: Date.now(),
     });
 
-    // Call Fly.io to restart machine
-    if (agent.flyMachineId) {
-      await ctx.scheduler.runAfter(0, internal.docker.restartMachine, {
-        machineId: agent.flyMachineId,
+    // Restart via containers module (stop + start)
+    const containerRef = agent.containerId || agent.flyMachineId;
+    const containerApi = getContainerApi();
+    if (containerRef) {
+      await ctx.scheduler.runAfter(0, containerApi.stopContainer, {
+        containerId: containerRef,
+        agentId,
+      });
+      await ctx.scheduler.runAfter(1000, containerApi.startContainer, {
+        containerId: containerRef,
+        agentId,
       });
     }
 
@@ -292,8 +420,13 @@ export const restart = mutation({
   },
 });
 
-// Update status (internal)
-export const updateStatus = mutation({
+// ============ INTERNAL MUTATIONS ============
+
+/**
+ * Update status (internal use only)
+ * Called by container actions to update agent status
+ */
+export const updateStatus = internalMutation({
   args: {
     agentId: v.id("agents"),
     status: v.union(
