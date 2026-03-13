@@ -163,6 +163,8 @@ export const create = mutation({
     // WARNING: base64 is NOT encryption, just encoding
     const encryptedApiKey = btoa(args.apiKey);
 
+    const pairingCode = Math.floor(100000 + Math.random() * 900000).toString();
+
     const agentId = await ctx.db.insert("agents", {
       userId, // Use authenticated user ID
       name: args.name,
@@ -175,6 +177,7 @@ export const create = mutation({
       budgetLimit: args.budgetLimit,
       region: args.region || "auto",
       encryptedApiKey,
+      pairingCode,
       status: "creating",
       createdAt: now,
       updatedAt: now,
@@ -202,6 +205,7 @@ export const create = mutation({
       customPersonality: args.customPersonality,
       skills: args.skills,
       region: args.region || "auto",
+      pairingCode,
     });
 
     return { agentId, status: "creating" };
@@ -430,6 +434,51 @@ export const restart = mutation({
     return { success: true, status: "running" };
   },
 });
+
+/**
+ * Pair agent with a client
+ * SECURITY: Check agent ownership and pairing code
+ */
+export const pair = mutation({
+  args: {
+    agentId: v.id("agents"),
+    code: v.string(),
+  },
+  handler: async (ctx, { agentId, code }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized");
+    }
+
+    const agent = await ctx.db.get(agentId);
+    if (!agent || agent.userId !== identity.subject) {
+      throw new Error("Agent not found");
+    }
+
+    if (agent.pairingCode !== code) {
+      throw new Error("Invalid pairing code");
+    }
+
+    // Generate a pairing token (UUID-like)
+    const pairingToken = crypto.randomUUID();
+
+    await ctx.db.patch(agentId, {
+      pairingToken,
+      updatedAt: Date.now(),
+    });
+
+    await ctx.db.insert("actions", {
+      agentId,
+      action: "paired",
+      details: { timestamp: Date.now() },
+      triggeredBy: identity.subject,
+      createdAt: Date.now(),
+    });
+
+    return { pairingToken };
+  },
+});
+
 
 // ============ INTERNAL MUTATIONS ============
 

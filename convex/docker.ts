@@ -58,6 +58,7 @@ export const createContainer = internalAction({
     customPersonality: v.optional(v.string()),
     skills: v.array(v.string()),
     region: v.optional(v.string()),
+    pairingCode: v.string(),
   },
   handler: async (ctx, args): Promise<{ containerId: string; port: number }> => {
     const {
@@ -70,6 +71,7 @@ export const createContainer = internalAction({
       personality,
       customPersonality,
       skills,
+      pairingCode,
     } = args;
 
     // Ensure shared volume exists
@@ -96,6 +98,7 @@ export const createContainer = internalAction({
       `-e ZEROCLAW_MEMORY_AUTO_SAVE="true"`,
       `-e ZEROCLAW_AUTONOMY_LEVEL="supervised"`,
       `-e ZEROCLAW_WORKSPACE_ONLY="true"`,
+      `-e ZEROCLAW_PAIRING_CODE="${pairingCode}"`,
     ];
 
     if (customPersonality) {
@@ -290,8 +293,9 @@ export const callAgent = internalAction({
     containerId: v.string(),
     message: v.string(),
     agentId: v.id("agents"),
+    pairingToken: v.optional(v.string()),
   },
-  handler: async (ctx, { containerId, message, agentId }) => {
+  handler: async (ctx, { containerId, message, agentId, pairingToken }) => {
     let port;
     try {
       const { stdout: portOut } = await execAsync(`docker port ${containerId} ${GATEWAY_PORT}/tcp`);
@@ -312,6 +316,7 @@ export const callAgent = internalAction({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(pairingToken ? { "Authorization": `Bearer ${pairingToken}` } : {}),
         },
         body: JSON.stringify({ message }),
         signal: AbortSignal.timeout(30000), // 30 second timeout

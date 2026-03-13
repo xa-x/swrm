@@ -71,7 +71,7 @@ export const send = mutation({
     }
 
     const agent = await ctx.db.get(args.agentId);
-    
+
     if (!agent) {
       throw new Error("Agent not found");
     }
@@ -103,7 +103,7 @@ export const send = mutation({
     // Get container/VM identifier
     // Docker uses containerId, Fly uses flyMachineId
     const containerRef = agent.containerId || agent.flyMachineId;
-    
+
     if (!containerRef) {
       throw new Error("Agent has no running container");
     }
@@ -114,6 +114,7 @@ export const send = mutation({
       containerId: containerRef,
       message: args.content,
       agentId: args.agentId,
+      pairingToken: agent.pairingToken,
     });
 
     // Store assistant message

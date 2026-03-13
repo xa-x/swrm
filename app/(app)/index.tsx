@@ -104,7 +104,7 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
       >
         {displayAgents.map((agent: any) => (
-          <AgentCard key={agent._id || agent.id} agent={agent} onPress={() => router.push('/(app)/(tabs)')} />
+          <AgentCard key={agent._id || agent.id} agent={agent} onPress={() => router.push(`/agent/${agent._id || agent.id}`)} />
         ))}
 
         {/* Add Agent Card */}

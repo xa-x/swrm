@@ -120,6 +120,7 @@ export const createContainer = action({
     customPersonality: v.optional(v.string()),
     skills: v.array(v.string()),
     region: v.optional(v.string()),
+    pairingCode: v.string(),
   },
   handler: async (ctx, args): Promise<{ machineId: string; internalUrl: string }> => {
     const {
@@ -132,6 +133,7 @@ export const createContainer = action({
       personality,
       customPersonality,
       skills,
+      pairingCode,
       region = "auto",
     } = args;
 
@@ -168,6 +170,7 @@ export const createContainer = action({
       // Autonomy level
       ZEROCLAW_AUTONOMY_LEVEL: "supervised",
       ZEROCLAW_WORKSPACE_ONLY: "true",
+      ZEROCLAW_PAIRING_CODE: pairingCode,
     };
 
     // Add custom personality if provided
@@ -474,8 +477,9 @@ export const callAgent = action({
     machineId: v.string(),
     message: v.string(),
     agentId: v.id("agents"),
+    pairingToken: v.optional(v.string()),
   },
-  handler: async (ctx, { machineId, message, agentId }) => {
+  handler: async (ctx, { machineId, message, agentId, pairingToken }) => {
     // Internal Fly.io URL
     const agentUrl = `http://${machineId}.vm.${FLY_APP_NAME}.internal:42617/agent`;
 
@@ -484,6 +488,7 @@ export const callAgent = action({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(pairingToken ? { "Authorization": `Bearer ${pairingToken}` } : {}),
         },
         body: JSON.stringify({ message }),
         signal: AbortSignal.timeout(30000), // 30 second timeout
