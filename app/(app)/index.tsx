@@ -5,7 +5,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import { useConvexAuth } from 'convex/react';
-import { useAgents, useAuthTest } from '@/lib/hooks';
+import { useAgents } from '@/lib/hooks';
 import { agentsDb, LocalAgent, AgentStatus } from '@/lib/db';
 
 export default function HomeScreen() {
@@ -14,16 +14,6 @@ export default function HomeScreen() {
   const [localAgents, setLocalAgents] = useState<LocalAgent[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const insets = useSafeAreaInsets();
-
-  // Backend Auth Test
-  const authTestResult = useAuthTest();
-  useEffect(() => {
-    if (authTestResult !== undefined) {
-      console.log('--- CONVEX BACKEND AUTH TEST ---');
-      console.log('Is Authenticated?', !!authTestResult);
-      console.log('Identity:', JSON.stringify(authTestResult, null, 2));
-    }
-  }, [authTestResult]);
 
   // Real-time subscription to agents
   const agents = useAgents(isAuthenticated && userId ? userId : null);
@@ -114,7 +104,7 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
       >
         {displayAgents.map((agent: any) => (
-          <AgentCard key={agent._id || agent.id} agent={agent} onPress={() => openChat(agent._id || agent.id)} />
+          <AgentCard key={agent._id || agent.id} agent={agent} onPress={() => router.push('/(app)/(tabs)')} />
         ))}
 
         {/* Add Agent Card */}

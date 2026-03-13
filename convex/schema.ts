@@ -23,6 +23,8 @@ export default defineSchema({
     ),
     region: v.optional(v.string()),
     encryptedApiKey: v.string(),
+    pairingToken: v.optional(v.string()),
+    pairingCode: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
