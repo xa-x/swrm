@@ -39,7 +39,7 @@ export default defineSchema({
     .index("by_user", ["userId"])
     .index("by_status", ["status"]),
 
-  // Usage
+  // Usage (for Z AI credits tracking)
   usage: defineTable({
     agentId: v.id("agents"),
     inputTokens: v.number(),

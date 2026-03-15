@@ -7,6 +7,10 @@ export const send = mutation({
     agentId: v.id("agents"),
     content: v.string(),
   },
+  returns: v.object({
+    response: v.string(),
+    tokens: v.number(),
+  }),
   handler: async (ctx, { agentId, content }) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthorized");
@@ -24,11 +28,14 @@ export const send = mutation({
       throw new Error("No machine");
     }
 
-    const response = await ctx.scheduler.runAfter(0, internal.fly.callAgent, {
+    const result = await ctx.scheduler.runAfter(0, internal.fly.callAgent, {
       machineId: agent.containerId,
       message: content,
       pairingToken: agent.pairingToken,
     });
+
+    // Type assertion for the result
+    const response = result as unknown as { content: string; tokens: number };
 
     if (agent.useSwrmCredits) {
       await ctx.db.insert("usage", {
