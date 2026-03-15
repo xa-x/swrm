@@ -1,13 +1,12 @@
+import { useEffect } from "react";
+import { View, ActivityIndicator, Text } from "react-native";
+import { useAuth } from "@clerk/expo";
+import { useConvexAuth } from "convex/react";
+import { registerForPushNotifications } from "@/lib/notifications";
+import { useAgents } from "@/lib/hooks";
+import { Redirect } from "expo-router";
 
-import { useEffect } from 'react';
-import { View, ActivityIndicator, Text } from 'react-native';
-import { useAuth } from '@clerk/clerk-expo';
-import { useConvexAuth } from 'convex/react';
-import { registerForPushNotifications } from '@/lib/notifications';
-import { useAgents } from '@/lib/hooks';
-import { Redirect } from 'expo-router';
-
-export default function RootNavigator() {
+export default function Onboaeding() {
   const { isLoaded, userId, isSignedIn } = useAuth();
   const { isAuthenticated } = useConvexAuth();
 
@@ -27,7 +26,7 @@ export default function RootNavigator() {
 
   // 2. Not signed into Clerk → Auth flow
   if (!isSignedIn) {
-    return <Redirect href="/auth" />;
+    return <Redirect href="/(auth)" />;
   }
 
   // 3. Loading agents from Convex

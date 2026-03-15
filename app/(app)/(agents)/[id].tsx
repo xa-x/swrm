@@ -1,14 +1,7 @@
 /**
- * Chat Screen
+ * Agent Chat Screen
  * 
- * Privacy-first: No message history stored.
- * Messages are sent directly to ZeroClaw and displayed temporarily.
- * 
- * Flow:
- * 1. User types message
- * 2. Send to Convex → ZeroClaw webhook
- * 3. Display response
- * 4. Clear on screen close (no persistence)
+ * Privacy-first: No message storage
  */
 
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from 'react-native';
@@ -16,7 +9,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import Markdown from 'react-native-markdown-display';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '@/convex/_generated/api';
 
@@ -27,24 +19,21 @@ interface Message {
   timestamp: number;
 }
 
-export default function ChatScreen() {
+export default function AgentChatScreen() {
   const { id: agentId } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Get agent info
   const agent = useQuery(
     api.agents.get,
     agentId ? { agentId: agentId as any } : 'skip'
   );
 
-  // Send message mutation
   const sendMessage = useMutation(api.chat.send);
 
   const scrollToBottom = useCallback(() => {
@@ -62,9 +51,8 @@ export default function ChatScreen() {
 
     const text = inputText.trim();
     setInputText('');
-    setError(null);
 
-    // Add user message to local state
+    // Add user message
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -75,13 +63,12 @@ export default function ChatScreen() {
     setIsTyping(true);
 
     try {
-      // Send to ZeroClaw via Convex
       const response = await sendMessage({
         agentId: agentId as any,
         content: text,
       });
 
-      // Add assistant message to local state
+      // Add assistant message
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -90,27 +77,12 @@ export default function ChatScreen() {
       };
       setMessages(prev => [...prev, assistantMessage]);
     } catch (err: any) {
-      console.error('Failed to send message:', err);
-      
-      const errorMessage = err.message || 'Failed to get response';
-      
-      if (errorMessage.includes('not running')) {
-        setError('Agent is not running. Start it first.');
-      } else if (errorMessage.includes('timeout') || errorMessage.includes('not responding')) {
-        setError('Agent is taking too long. Try again?');
-      } else {
-        setError('Something went wrong. Please try again.');
-      }
+      Alert.alert('Error', err.message || 'Failed to send message');
     } finally {
       setIsTyping(false);
     }
   };
 
-  const handleRetry = () => {
-    setError(null);
-  };
-
-  // Loading state
   if (agent === undefined) {
     return (
       <View style={styles.container}>
@@ -121,12 +93,10 @@ export default function ChatScreen() {
     );
   }
 
-  // Agent not found
   if (!agent) {
     return (
       <View style={styles.container}>
         <View style={styles.error}>
-          <Ionicons name="alert-circle" size={48} color="#FF3B30" />
           <Text style={styles.errorTitle}>Agent not found</Text>
           <TouchableOpacity style={styles.errorButton} onPress={() => router.back()}>
             <Text style={styles.errorButtonText}>Go back</Text>
@@ -136,18 +106,14 @@ export default function ChatScreen() {
     );
   }
 
-  // Agent not running
   if (agent.status !== 'running') {
     return (
       <View style={styles.container}>
         <View style={styles.error}>
-          <View style={styles.statusIcon}>
-            <Ionicons name="stop-circle" size={48} color="#8E8E93" />
-          </View>
+          <Ionicons name="stop-circle" size={48} color="#8E8E93" />
           <Text style={styles.errorTitle}>{agent.name} is sleeping</Text>
-          <Text style={styles.errorText}>Start this agent to chat with it</Text>
-          <TouchableOpacity style={styles.errorButton} onPress={() => router.push(`/agent/${agentId}`)}>
-            <Text style={styles.errorButtonText}>Manage Agent</Text>
+          <TouchableOpacity style={styles.errorButton} onPress={() => router.back()}>
+            <Text style={styles.errorButtonText}>Go back</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -174,7 +140,7 @@ export default function ChatScreen() {
 
         <TouchableOpacity
           style={styles.moreButton}
-          onPress={() => router.push(`/agent/${agentId}`)}
+          onPress={() => router.push(`/settings/agent/${agentId}`)}
         >
           <Ionicons name="ellipsis-horizontal" size={24} color="#007AFF" />
         </TouchableOpacity>
@@ -184,21 +150,19 @@ export default function ChatScreen() {
       <KeyboardAvoidingView
         style={styles.content}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
       >
         <ScrollView
           ref={scrollViewRef}
           style={styles.messages}
           contentContainerStyle={styles.messagesContent}
           onContentSizeChange={scrollToBottom}
-          showsVerticalScrollIndicator={false}
         >
           {/* Privacy Notice */}
           {messages.length === 0 && (
             <View style={styles.privacyNotice}>
               <Ionicons name="lock-closed" size={16} color="#8E8E93" />
               <Text style={styles.privacyText}>
-                Messages are not stored. Start a fresh chat each time.
+                Messages are not stored
               </Text>
             </View>
           )}
@@ -207,32 +171,29 @@ export default function ChatScreen() {
           {messages.length === 0 && (
             <View style={styles.empty}>
               <Text style={styles.emptyEmoji}>💬</Text>
-              <Text style={styles.emptyText}>
-                Send a message to start
-              </Text>
+              <Text style={styles.emptyText}>Send a message to start</Text>
             </View>
           )}
 
           {/* Messages */}
           {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
+            <View
+              key={message.id}
+              style={[
+                styles.bubble,
+                message.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant
+              ]}
+            >
+              <Text style={message.role === 'user' ? styles.bubbleTextUser : styles.bubbleTextAssistant}>
+                {message.content}
+              </Text>
+            </View>
           ))}
 
           {/* Typing Indicator */}
           {isTyping && (
             <View style={styles.typingIndicator}>
-              <Text style={styles.typingDots}>●●●</Text>
-              <Text style={styles.typingText}> Thinking...</Text>
-            </View>
-          )}
-
-          {/* Error */}
-          {error && (
-            <View style={styles.errorBanner}>
-              <Text style={styles.errorBannerText}>{error}</Text>
-              <TouchableOpacity onPress={handleRetry}>
-                <Text style={styles.errorBannerAction}>Retry</Text>
-              </TouchableOpacity>
+              <Text style={styles.typingText}>Thinking...</Text>
             </View>
           )}
         </ScrollView>
@@ -266,56 +227,11 @@ export default function ChatScreen() {
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
-  const isUser = message.role === 'user';
-
-  return (
-    <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleAssistant]}>
-      {isUser ? (
-        <Text style={styles.bubbleTextUser}>{message.content}</Text>
-      ) : (
-        <Markdown style={markdownStyles}>{message.content}</Markdown>
-      )}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFF',
-  },
-  loading: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  error: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 12,
-    padding: 40,
-  },
-  statusIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#F2F2F7',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#000',
-  },
-  errorText: {
-    fontSize: 16,
-    color: '#8E8E93',
-    textAlign: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#FFF' },
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  error: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, padding: 40 },
+  errorTitle: { fontSize: 20, fontWeight: '600', color: '#000' },
   errorButton: {
     backgroundColor: '#007AFF',
     paddingHorizontal: 24,
@@ -323,11 +239,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginTop: 8,
   },
-  errorButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFF',
-  },
+  errorButtonText: { fontSize: 16, fontWeight: '600', color: '#FFF' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -336,70 +248,27 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5EA',
   },
-  backButton: {
-    padding: 8,
-  },
-  headerCenter: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#000',
-  },
-  headerStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 2,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  headerStatusText: {
-    fontSize: 12,
-    color: '#8E8E93',
-  },
-  moreButton: {
-    padding: 8,
-  },
-  content: {
-    flex: 1,
-  },
-  messages: {
-    flex: 1,
-  },
-  messagesContent: {
-    padding: 16,
-    paddingBottom: 8,
-  },
+  backButton: { padding: 8 },
+  headerCenter: { flex: 1, alignItems: 'center' },
+  headerTitle: { fontSize: 17, fontWeight: '600', color: '#000' },
+  headerStatus: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  headerStatusText: { fontSize: 12, color: '#8E8E93' },
+  moreButton: { padding: 8 },
+  content: { flex: 1 },
+  messages: { flex: 1 },
+  messagesContent: { padding: 16, paddingBottom: 8 },
   privacyNotice: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     marginBottom: 24,
-    paddingHorizontal: 16,
   },
-  privacyText: {
-    fontSize: 13,
-    color: '#8E8E93',
-  },
-  empty: {
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptyEmoji: {
-    fontSize: 48,
-    marginBottom: 16,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#8E8E93',
-  },
+  privacyText: { fontSize: 13, color: '#8E8E93' },
+  empty: { alignItems: 'center', paddingVertical: 60 },
+  emptyEmoji: { fontSize: 48, marginBottom: 16 },
+  emptyText: { fontSize: 16, color: '#8E8E93' },
   bubble: {
     maxWidth: '85%',
     padding: 14,
@@ -416,48 +285,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#F2F2F7',
     borderBottomLeftRadius: 4,
   },
-  bubbleTextUser: {
-    fontSize: 16,
-    color: '#FFF',
-    lineHeight: 22,
-  },
+  bubbleTextUser: { fontSize: 16, color: '#FFF', lineHeight: 22 },
+  bubbleTextAssistant: { fontSize: 16, color: '#000', lineHeight: 22 },
   typingIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
     alignSelf: 'flex-start',
     padding: 14,
     backgroundColor: '#F2F2F7',
     borderRadius: 18,
   },
-  typingDots: {
-    fontSize: 10,
-    color: '#8E8E93',
-    letterSpacing: 4,
-  },
-  typingText: {
-    fontSize: 14,
-    color: '#8E8E93',
-  },
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFF0F0',
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 12,
-  },
-  errorBannerText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#FF3B30',
-  },
-  errorBannerAction: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FF3B30',
-    marginLeft: 12,
-  },
+  typingText: { fontSize: 14, color: '#8E8E93' },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -487,62 +323,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sendButtonDisabled: {
-    backgroundColor: '#C7C7CC',
-  },
-});
-
-const markdownStyles = StyleSheet.create({
-  body: {
-    fontSize: 16,
-    color: '#000',
-    lineHeight: 22,
-  },
-  heading1: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#000',
-    marginBottom: 8,
-  },
-  heading2: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#000',
-    marginBottom: 6,
-  },
-  code_inline: {
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 14,
-    backgroundColor: '#E5E5EA',
-    paddingHorizontal: 4,
-    borderRadius: 4,
-  },
-  code_block: {
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 13,
-    backgroundColor: '#1C1C1E',
-    color: '#FFF',
-    padding: 12,
-    borderRadius: 8,
-    marginVertical: 8,
-  },
-  fence: {
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 13,
-    backgroundColor: '#1C1C1E',
-    color: '#FFF',
-    padding: 12,
-    borderRadius: 8,
-    marginVertical: 8,
-  },
-  blockquote: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#007AFF',
-    paddingLeft: 12,
-    marginVertical: 8,
-  },
-  link: {
-    color: '#007AFF',
-    textDecorationLine: 'underline',
-  },
+  sendButtonDisabled: { backgroundColor: '#C7C7CC' },
 });

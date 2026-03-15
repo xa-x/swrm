@@ -3,184 +3,126 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect, useCallback, useState } from 'react';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '@clerk/clerk-expo';
-import { useConvexAuth } from 'convex/react';
-import { useAgents } from '@/lib/hooks';
-import { agentsDb, LocalAgent, AgentStatus } from '@/lib/db';
+import { useConvexAuth, useQuery } from 'convex/react';
+import { api } from '@/convex/_generated/api';
 
-export default function HomeScreen() {
-  const { userId } = useAuth();
-  const { isAuthenticated } = useConvexAuth();
-  const [localAgents, setLocalAgents] = useState<LocalAgent[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
+type AgentStatus = 'creating' | 'running' | 'stopped' | 'error';
+
+interface Agent {
+  _id: string;
+  name: string;
+  icon?: string;
+  provider: string;
+  model?: string;
+  status: AgentStatus;
+}
+
+export default function AgentsListScreen() {
+  const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
   const insets = useSafeAreaInsets();
+  const [refreshing, setRefreshing] = useState(false);
 
   // Real-time subscription to agents
-  const agents = useAgents(isAuthenticated && userId ? userId : null);
-
-  // Load local cache
-  useEffect(() => {
-    loadLocalAgents();
-  }, []);
-
-  // Sync Convex data to local DB
-  useEffect(() => {
-    if (agents) {
-      syncToLocal(agents);
-    }
-  }, [agents]);
-
-  const loadLocalAgents = async () => {
-    const local = await agentsDb.getAll();
-    setLocalAgents(local);
-  };
-
-  const syncToLocal = async (serverAgents: any[]) => {
-    for (const agent of serverAgents) {
-      await agentsDb.upsert({
-        id: agent._id,
-        name: agent.name,
-        icon: agent.icon,
-        provider: agent.provider,
-        model: agent.model,
-        personality: agent.personality,
-        skills: agent.skills,
-        status: agent.status,
-        region: agent.region,
-      });
-    }
-    loadLocalAgents();
-  };
+  const agents = useQuery(
+    api.agents.list,
+    isAuthenticated ? {} : 'skip'
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    // Convex automatically refreshes, just update local
-    loadLocalAgents().then(() => setRefreshing(false));
+    setTimeout(() => setRefreshing(false), 1000);
   }, []);
 
-  const openChat = (agentId: string) => {
-    router.push(`/chat/${agentId}`);
+  const openAgent = (agentId: string) => {
+    router.push(`/(app)/(agents)/${agentId}`);
   };
 
   const createAgent = () => {
-    router.push('/create');
+    router.push('/(app)/create');
   };
 
   // Loading state
-  if (agents === undefined && localAgents.length === 0) {
+  if (authLoading || (agents === undefined && !refreshing)) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.loading}>
-          <ActivityIndicator size="large" />
-          <Text> Loading state  </Text>
+          <ActivityIndicator size="large" color="#007AFF" />
         </View>
       </View>
     );
   }
 
-  // Use server data if available, else local cache
-  const displayAgents = agents || localAgents;
-
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Swrm</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.iconButton} onPress={() => router.push('/broadcast')}>
-            <Ionicons name="megaphone-outline" size={24} color="#007AFF" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton} onPress={() => router.push('/settings')}>
-            <Ionicons name="settings-outline" size={24} color="#007AFF" />
-          </TouchableOpacity>
-        </View>
+        <Text style={styles.title}>My Agents</Text>
+        <TouchableOpacity style={styles.iconButton} onPress={() => router.push('/settings')}>
+          <Ionicons name="settings-outline" size={24} color="#007AFF" />
+        </TouchableOpacity>
       </View>
 
-      {/* Agent Grid */}
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.grid}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        showsVerticalScrollIndicator={false}
-      >
-        {displayAgents.map((agent: any) => (
-          <AgentCard key={agent._id || agent.id} agent={agent} onPress={() => router.push(`/agent/${agent._id || agent.id}`)} />
-        ))}
+      {/* Agent List */}
+      {agents && agents.length > 0 ? (
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.list}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
+          {agents.map((agent: Agent) => (
+            <TouchableOpacity 
+              key={agent._id} 
+              style={styles.card} 
+              onPress={() => openAgent(agent._id)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.cardLeft}>
+                <Text style={styles.cardIcon}>{agent.icon || '🤖'}</Text>
+              </View>
+              
+              <View style={styles.cardCenter}>
+                <Text style={styles.cardName} numberOfLines={1}>
+                  {agent.name}
+                </Text>
+                <Text style={styles.cardMeta} numberOfLines={1}>
+                  {agent.provider} {agent.model ? `• ${agent.model}` : ''}
+                </Text>
+              </View>
 
-        {/* Add Agent Card */}
-        <TouchableOpacity style={styles.addCard} onPress={createAgent}>
-          <Ionicons name="add" size={32} color="#8E8E93" />
-          <Text style={styles.addText}>New Agent</Text>
-        </TouchableOpacity>
-      </ScrollView>
-
-      {/* Empty State */}
-      {displayAgents.length === 0 && (
+              <View style={styles.cardRight}>
+                <View style={[
+                  styles.statusDot, 
+                  { backgroundColor: agent.status === 'running' ? '#34C759' : '#8E8E93' }
+                ]} />
+              </View>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      ) : (
+        /* Empty State */
         <View style={styles.empty}>
-          <Ionicons name="rocket-outline" size={64} color="#C7C7CC" />
+          <Text style={styles.emptyEmoji}>🤖</Text>
           <Text style={styles.emptyTitle}>No agents yet</Text>
-          <Text style={styles.emptyText}>Create your first AI agent to get started</Text>
+          <Text style={styles.emptyText}>Create your first AI agent</Text>
           <TouchableOpacity style={styles.emptyButton} onPress={createAgent}>
+            <Ionicons name="add" size={20} color="#FFF" />
             <Text style={styles.emptyButtonText}>Create Agent</Text>
           </TouchableOpacity>
         </View>
       )}
+
+      {/* FAB */}
+      {agents && agents.length > 0 && (
+        <TouchableOpacity 
+          style={[styles.fab, { bottom: insets.bottom + 20 }]} 
+          onPress={createAgent}
+        >
+          <Ionicons name="add" size={28} color="#FFF" />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
-
-function AgentCard({ agent, onPress }: { agent: any; onPress: () => void }) {
-  const status = agent.status as AgentStatus;
-
-  const statusColor = {
-    creating: '#FF9500',
-    running: '#34C759',
-    idle: '#FFCC00',
-    stopped: '#8E8E93',
-    error: '#FF3B30',
-  }[status];
-
-  const statusIcon = {
-    creating: 'sync',
-    running: 'radio-button-on',
-    idle: 'pause-circle',
-    stopped: 'stop-circle',
-    error: 'alert-circle',
-  }[status] as keyof typeof Ionicons.glyphMap;
-
-  return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.7}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardIcon}>{agent.icon || '🤖'}</Text>
-        <View style={styles.cardStatus}>
-          <Ionicons name={statusIcon} size={12} color={statusColor} />
-        </View>
-      </View>
-
-      <Text style={styles.cardName} numberOfLines={1}>
-        {agent.name}
-      </Text>
-
-      <Text style={styles.cardMeta} numberOfLines={1}>
-        {agent.provider} • {agent.model || 'default'}
-      </Text>
-
-      <View style={styles.cardFooter}>
-        <Text style={styles.cardCost}>${(agent.monthlyCost || 0).toFixed(2)}</Text>
-        <Text style={styles.cardPeriod}>this month</Text>
-      </View>
-
-      {status === 'running' && (
-        <View style={styles.cardBadge}>
-          <Text style={styles.cardBadgeText}>Active</Text>
-        </View>
-      )}
-    </TouchableOpacity>
-  );
-}
-
-const CARD_SIZE = 160;
-const GAP = 12;
 
 const styles = StyleSheet.create({
   container: {
@@ -204,141 +146,110 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#000',
   },
-  headerActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
   iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#E5E5EA',
     alignItems: 'center',
     justifyContent: 'center',
   },
   content: {
     flex: 1,
-    paddingHorizontal: 20,
   },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: GAP,
+  list: {
+    paddingHorizontal: 20,
     paddingBottom: 100,
+    gap: 12,
   },
   card: {
-    width: CARD_SIZE,
-    height: CARD_SIZE,
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#FFF',
     borderRadius: 16,
     padding: 16,
+    gap: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowRadius: 4,
+    elevation: 1,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  cardLeft: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#F2F2F7',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   cardIcon: {
-    fontSize: 28,
+    fontSize: 24,
   },
-  cardStatus: {
-    width: 16,
-    height: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#000',
-    marginTop: 12,
-  },
-  cardMeta: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginTop: 4,
-  },
-  cardFooter: {
-    position: 'absolute',
-    bottom: 16,
-    left: 16,
-    flexDirection: 'row',
-    alignItems: 'baseline',
+  cardCenter: {
+    flex: 1,
     gap: 4,
   },
-  cardCost: {
-    fontSize: 16,
+  cardName: {
+    fontSize: 17,
     fontWeight: '600',
     color: '#000',
   },
-  cardPeriod: {
-    fontSize: 11,
-    color: '#8E8E93',
-  },
-  cardBadge: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    backgroundColor: '#34C759',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  cardBadgeText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#FFF',
-  },
-  addCard: {
-    width: CARD_SIZE,
-    height: CARD_SIZE,
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#E5E5EA',
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  addText: {
+  cardMeta: {
     fontSize: 14,
     color: '#8E8E93',
-    fontWeight: '500',
+  },
+  cardRight: {
+    alignItems: 'flex-end',
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   empty: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 40,
+    gap: 12,
+  },
+  emptyEmoji: {
+    fontSize: 64,
   },
   emptyTitle: {
     fontSize: 22,
     fontWeight: '600',
     color: '#000',
-    marginTop: 16,
   },
   emptyText: {
     fontSize: 16,
     color: '#8E8E93',
-    textAlign: 'center',
-    marginTop: 8,
   },
   emptyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     backgroundColor: '#007AFF',
     paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginTop: 24,
+    paddingVertical: 14,
+    borderRadius: 14,
+    marginTop: 16,
   },
   emptyButtonText: {
     fontSize: 16,

@@ -1,50 +1,19 @@
 "use node";
 
-/**
- * Docker Engine Container Management (Development / Fallback)
- * 
- * Uses Docker CLI (child_process) for local container orchestration.
- * SECURITY: Only runs server-side via internalAction.
- * 
- * SHARED VOLUME: All containers mount `swrm-shared` at /workspace
- * for agent file sharing (code, data, artifacts).
- */
-
 import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { decryptApiKey } from "./encryption";
 
 const execAsync = promisify(exec);
 
-// ZeroClaw image
 const ZEROCLAW_IMAGE = "ghcr.io/zeroclaw-labs/zeroclaw:latest";
-
-// Shared volume for agent workspace
-const SHARED_VOLUME = "swrm-shared";
-
-// Gateway port inside container
 const GATEWAY_PORT = 42617;
 
 /**
- * Ensure shared volume exists
- */
-async function ensureSharedVolume(): Promise<void> {
-  try {
-    const { stdout } = await execAsync(`docker volume ls -q -f name=^${SHARED_VOLUME}$`);
-    if (!stdout.trim()) {
-      await execAsync(`docker volume create --name ${SHARED_VOLUME} --label ai.swrm.managed=true --label ai.swrm.purpose=agent-workspace`);
-      console.log(`✅ Created shared volume: ${SHARED_VOLUME}`);
-    }
-  } catch (error) {
-    console.error("Failed to ensure shared volume:", error);
-    // Continue anyway - volume mount will fail if truly missing
-  }
-}
-
-/**
- * Create a container for an agent
+ * Spawn ZeroClaw container with auto-pairing
  */
 export const createContainer = internalAction({
   args: {
@@ -54,309 +23,188 @@ export const createContainer = internalAction({
     provider: v.string(),
     apiKey: v.string(),
     model: v.optional(v.string()),
-    personality: v.string(),
-    customPersonality: v.optional(v.string()),
-    skills: v.array(v.string()),
-    region: v.optional(v.string()),
-    pairingCode: v.string(),
+    systemPrompt: v.string(),
   },
-  handler: async (ctx, args): Promise<{ containerId: string; port: number }> => {
-    const {
-      agentId,
-      userId,
-      name,
-      provider,
-      apiKey,
-      model,
-      personality,
-      customPersonality,
-      skills,
-      pairingCode,
-    } = args;
+  handler: async (ctx, args) => {
+    const { agentId, userId, name, provider, apiKey, model, systemPrompt } = args;
 
-    // Ensure shared volume exists
-    await ensureSharedVolume();
+    const decryptedKey = apiKey.length > 50 ? decryptApiKey(apiKey) : apiKey;
+    const containerName = `swrm-${agentId.replace(/[^a-z0-9]/gi, "-").toLowerCase()}`;
 
-    // Container name (Docker requires lowercase, alphanumeric, hyphens)
-    const containerName = `swrm-agent-${agentId.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
-
-    // Build personality prompt
-    const personalityPrompt = getPersonalityPrompt(personality, customPersonality);
-
-    // Build environment variables array
-    const envArgs: string[] = [
-      `-e ZEROCLAW_API_KEY="${apiKey}"`,
-      `-e ZEROCLAW_PROVIDER="${provider}"`,
-      `-e ZEROCLAW_MODEL="${model || "default"}"`,
-      `-e AGENT_ID="${agentId}"`,
-      `-e AGENT_NAME="${name}"`,
-      `-e AGENT_PERSONALITY="${personalityPrompt.replace(/"/g, '\\"')}"`,
-      `-e AGENT_SKILLS="${skills.join(",")}"`,
-      `-e ZEROCLAW_GATEWAY_PORT="${GATEWAY_PORT}"`,
-      `-e ZEROCLAW_GATEWAY_HOST="0.0.0.0"`,
-      `-e ZEROCLAW_MEMORY_BACKEND="sqlite"`,
-      `-e ZEROCLAW_MEMORY_AUTO_SAVE="true"`,
-      `-e ZEROCLAW_AUTONOMY_LEVEL="supervised"`,
-      `-e ZEROCLAW_WORKSPACE_ONLY="true"`,
-      `-e ZEROCLAW_PAIRING_CODE="${pairingCode}"`,
-    ];
-
-    if (customPersonality) {
-      envArgs.push(`-e AGENT_CUSTOM_PERSONALITY="${customPersonality.replace(/"/g, '\\"')}"`);
-    }
+    const env = [
+      `API_KEY=${decryptedKey}`,
+      `PROVIDER=${provider}`,
+      model ? `ZEROCLAW_MODEL=${model}` : "",
+      `ZEROCLAW_GATEWAY_PORT=${GATEWAY_PORT}`,
+      `ZEROCLAW_ALLOW_PUBLIC_BIND=true`,
+      `ZEROCLAW_SYSTEM_PROMPT_BASE64=${Buffer.from(systemPrompt).toString("base64")}`,
+    ].filter(Boolean);
 
     try {
-      // Create container using docker CLI
-      const cmd = `docker run -d \\
-        --name ${containerName} \\
-        ${envArgs.join(" ")} \\
-        -p ${GATEWAY_PORT} \\
-        -v ${SHARED_VOLUME}:/workspace:rw \\
-        --restart on-failure:3 \\
-        --memory 512m \\
-        --cpus 1 \\
-        --label ai.swrm.managed=true \\
-        --label ai.swrm.agentId=${agentId} \\
-        --label ai.swrm.userId=${userId} \\
-        ${ZEROCLAW_IMAGE}`;
+      const { stdout } = await execAsync(
+        `docker run -d --name ${containerName} ` +
+        `${env.map(e => `-e "${e}"`).join(" ")} ` +
+        `-p ${GATEWAY_PORT} ` +
+        `--memory 512m --cpus 1 ` +
+        `--label ai.swrm.agentId=${agentId} ` +
+        `${ZEROCLAW_IMAGE} gateway`
+      );
 
-      const { stdout } = await execAsync(cmd);
       const containerId = stdout.trim();
 
-      // Get assigned port
-      const portCmd = `docker port ${containerId} ${GATEWAY_PORT}/tcp`;
-      const { stdout: portOutput } = await execAsync(portCmd);
+      const { stdout: portOut } = await execAsync(
+        `docker port ${containerId} ${GATEWAY_PORT}/tcp`
+      );
+      const port = portOut.match(/:(\d+)/)?.[1] || GATEWAY_PORT;
+      const containerUrl = `http://localhost:${port}`;
 
-      // Output format is usually "0.0.0.0:12345" or similar
-      const portMatch = portOutput.match(/:(\d+)/);
-      const port = portMatch ? parseInt(portMatch[1]) : GATEWAY_PORT;
+      await waitForHealthy(containerUrl, 30000);
 
-      // Update agent status
+      const pairingToken = await autoPair(containerUrl);
+
       await ctx.runMutation(internal.agents.updateStatus, {
         agentId,
         status: "running",
         containerId,
+        containerUrl,
+        pairingToken,
       });
 
-      // Log action
-      await ctx.runMutation(internal.actions.log, {
-        agentId,
-        action: "container_created",
-        details: {
-          containerId,
-          containerName,
-          port,
-          volume: SHARED_VOLUME,
-        },
-      });
-
-      console.log(`✅ Docker container created: ${containerId} for agent ${agentId}`);
-
-      return { containerId, port };
+      return { containerId, containerUrl };
     } catch (error: any) {
-      console.error("Failed to create container:", error);
-
-      // Update agent status to error
       await ctx.runMutation(internal.agents.updateStatus, {
         agentId,
         status: "error",
       });
-
-      // Log error
-      await ctx.runMutation(internal.actions.log, {
-        agentId,
-        action: "container_error",
-        details: { error: error.message },
-      });
-
       throw error;
     }
   },
 });
 
-/**
- * Start a stopped container
- */
+async function autoPair(containerUrl: string): Promise<string> {
+  const code = generatePairingCode();
+  
+  const response = await fetch(`${containerUrl}/pair`, {
+    method: "POST",
+    headers: { "X-Pairing-Code": code },
+  });
+
+  if (!response.ok) throw new Error("Auto-pairing failed");
+
+  const { token } = await response.json();
+  return token;
+}
+
+function generatePairingCode(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 8; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+}
+
+async function waitForHealthy(url: string, timeoutMs: number): Promise<void> {
+  const start = Date.now();
+  
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(`${url}/health`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      if (res.ok && (await res.json()).status === "ok") return;
+    } catch {}
+    await new Promise(r => setTimeout(r, 500));
+  }
+  
+  throw new Error("Container health check timeout");
+}
+
 export const startContainer = internalAction({
   args: {
     containerId: v.string(),
     agentId: v.id("agents"),
   },
   handler: async (ctx, { containerId, agentId }) => {
-    try {
-      await execAsync(`docker start ${containerId}`);
+    await execAsync(`docker start ${containerId}`);
+    
+    const { stdout: portOut } = await execAsync(
+      `docker port ${containerId} ${GATEWAY_PORT}/tcp`
+    );
+    const port = portOut.match(/:(\d+)/)?.[1] || GATEWAY_PORT;
+    const containerUrl = `http://localhost:${port}`;
 
-      await ctx.runMutation(internal.actions.log, {
-        agentId,
-        action: "container_started",
-        details: { containerId },
-      });
+    await waitForHealthy(containerUrl, 15000);
 
-      return { success: true };
-    } catch (error: any) {
-      throw new Error(`Failed to start container: ${error.message}`);
-    }
+    await ctx.runMutation(internal.agents.updateStatus, {
+      agentId,
+      status: "running",
+      containerUrl,
+    });
+
+    return { success: true };
   },
 });
 
-/**
- * Stop a running container
- */
 export const stopContainer = internalAction({
   args: {
     containerId: v.string(),
     agentId: v.id("agents"),
   },
   handler: async (ctx, { containerId, agentId }) => {
-    try {
-      await execAsync(`docker stop ${containerId}`);
+    await execAsync(`docker stop ${containerId}`);
+    
+    await ctx.runMutation(internal.agents.updateStatus, {
+      agentId,
+      status: "stopped",
+    });
 
-      await ctx.runMutation(internal.actions.log, {
-        agentId,
-        action: "container_stopped",
-        details: { containerId },
-      });
-
-      return { success: true };
-    } catch (error: any) {
-      throw new Error(`Failed to stop container: ${error.message}`);
-    }
+    return { success: true };
   },
 });
 
-/**
- * Remove a container
- */
 export const removeContainer = internalAction({
   args: {
     containerId: v.string(),
     agentId: v.id("agents"),
   },
   handler: async (ctx, { containerId, agentId }) => {
-    try {
-      // Remove container force
-      await execAsync(`docker rm -f ${containerId}`);
-
-      await ctx.runMutation(internal.actions.log, {
-        agentId,
-        action: "container_removed",
-        details: { containerId },
-      });
-
-      return { success: true };
-    } catch (error: any) {
-      throw new Error(`Failed to remove container: ${error.message}`);
-    }
+    await execAsync(`docker rm -f ${containerId}`);
+    return { success: true };
   },
 });
 
-/**
- * Get container status
- */
-export const getContainerStatus = internalAction({
-  args: {
-    containerId: v.string(),
-  },
-  handler: async (ctx, { containerId }) => {
-    try {
-      const { stdout: inspectOut } = await execAsync(`docker inspect --format='{{json .State}}' ${containerId}`);
-      const state = JSON.parse(inspectOut.trim());
-
-      let port = null;
-      try {
-        if (state.Running) {
-          const { stdout: portOut } = await execAsync(`docker port ${containerId} ${GATEWAY_PORT}/tcp`);
-          const portMatch = portOut.match(/:(\d+)/);
-          port = portMatch ? portMatch[1] : null;
-        }
-      } catch (e) {
-        // Ignored, port missing or stopped
-      }
-
-      return {
-        status: state.Status,
-        running: state.Running,
-        port,
-      };
-    } catch (error: any) {
-      throw new Error(`Failed to get container status: ${error.message}`);
-    }
-  },
-});
-
-/**
- * Call agent via HTTP
- * Routes to container's gateway port
- */
 export const callAgent = internalAction({
   args: {
-    containerId: v.string(),
+    containerUrl: v.string(),
     message: v.string(),
-    agentId: v.id("agents"),
     pairingToken: v.optional(v.string()),
   },
-  handler: async (ctx, { containerId, message, agentId, pairingToken }) => {
-    let port;
-    try {
-      const { stdout: portOut } = await execAsync(`docker port ${containerId} ${GATEWAY_PORT}/tcp`);
-      const portMatch = portOut.match(/:(\d+)/);
-      port = portMatch ? portMatch[1] : null;
-    } catch (e) {
-      throw new Error("Container port not mapped");
+  handler: async (ctx, { containerUrl, message, pairingToken }) => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (pairingToken) {
+      headers["Authorization"] = `Bearer ${pairingToken}`;
     }
 
-    if (!port) {
-      throw new Error("Container port not mapped");
+    const response = await fetch(`${containerUrl}/webhook`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message }),
+      signal: AbortSignal.timeout(60000),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Agent error: ${response.status}`);
     }
 
-    const agentUrl = `http://localhost:${port}/agent`;
-
-    try {
-      const response = await fetch(agentUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(pairingToken ? { "Authorization": `Bearer ${pairingToken}` } : {}),
-        },
-        body: JSON.stringify({ message }),
-        signal: AbortSignal.timeout(30000), // 30 second timeout
-      });
-
-      if (!response.ok) {
-        throw new Error(`Agent error: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      const outputTokens = Math.ceil((data.response || data.message || "").length / 4);
-
-      return {
-        content: data.response || data.message || "",
-        outputTokens,
-      };
-    } catch (error: any) {
-      if (error.message?.includes("ECONNREFUSED") || error.message?.includes("timeout") || error.message?.includes("fetch")) {
-        throw new Error("Agent is not responding. It may be stopped or starting.");
-      }
-      throw error;
-    }
+    const data = await response.json();
+    
+    return {
+      content: data.response || data.message || "",
+      tokens: Math.ceil((data.response || "").length / 4),
+    };
   },
 });
-
-/**
- * Helper: Get personality prompt
- */
-function getPersonalityPrompt(personality: string, custom?: string): string {
-  if (custom) return custom;
-
-  const prompts: Record<string, string> = {
-    professional:
-      "You are a professional assistant. Be thorough, accurate, and formal.",
-    friendly:
-      "You are a friendly assistant. Be warm, approachable, and conversational.",
-    concise: "You are a direct assistant. Be brief, to the point, no fluff.",
-    creative:
-      "You are a creative assistant. Think outside the box, offer unique perspectives.",
-  };
-
-  return prompts[personality] || prompts.professional;
-}

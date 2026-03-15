@@ -1,16 +1,18 @@
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { useAgent, useAgentActions, useUsageByAgent, useStartAgent, useStopAgent, useRestartAgent } from '@/lib/hooks';
+import { useAgent, useAgentActions, useUsageByAgent, useStartAgent, useStopAgent, useRestartAgent, Agent } from '@/lib/hooks';
 import { Ionicons } from '@expo/vector-icons';
+import { Id } from '@/convex/_generated/dataModel';
 
 export default function AgentHomeScreen() {
-    const { id } = useLocalSearchParams<{ id: string }>();
+    const { id: agentIdStr } = useLocalSearchParams<{ id: string }>();
+    const agentId = agentIdStr ? (agentIdStr as Id<"agents">) : null;
 
     // Convex hooks
-    const agent = useAgent(id as any);
-    const actions = useAgentActions(id as any, 20);
-    const usage = useUsageByAgent(id as any, 'month');
+    const agent = useAgent(agentId);
+    const actions = useAgentActions(agentId, 20);
+    const usage = useUsageByAgent(agentId, 'month');
 
     // Mutations
     const startAgent = useStartAgent();
@@ -18,24 +20,27 @@ export default function AgentHomeScreen() {
     const restartAgent = useRestartAgent();
 
     const handleStart = async () => {
+        if (!agentId) return;
         try {
-            await startAgent({ agentId: id as any });
+            await startAgent({ agentId });
         } catch (err: any) {
             Alert.alert('Error', err.message);
         }
     };
 
     const handleStop = async () => {
+        if (!agentId) return;
         try {
-            await stopAgent({ agentId: id as any });
+            await stopAgent({ agentId });
         } catch (err: any) {
             Alert.alert('Error', err.message);
         }
     };
 
     const handleRestart = async () => {
+        if (!agentId) return;
         try {
-            await restartAgent({ agentId: id as any });
+            await restartAgent({ agentId });
         } catch (err: any) {
             Alert.alert('Error', err.message);
         }
@@ -45,13 +50,14 @@ export default function AgentHomeScreen() {
         return null;
     }
 
-    const statusColor = {
+    const statusColors = {
         creating: '#FF9500',
         running: '#34C759',
         idle: '#FFCC00',
         stopped: '#8E8E93',
         error: '#FF3B30',
-    }[agent.status];
+    };
+    const statusColorValue = statusColors[agent.status as keyof typeof statusColors] ?? '#8E8E93';
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -63,7 +69,7 @@ export default function AgentHomeScreen() {
                         <View style={styles.agentDetails}>
                             <Text style={styles.agentName}>{agent.name}</Text>
                             <View style={styles.statusRow}>
-                                <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+                                 <View style={[styles.statusDot, { backgroundColor: statusColorValue as any }]} />
                                 <Text style={styles.statusText}>{agent.status}</Text>
                             </View>
                         </View>
@@ -136,16 +142,20 @@ export default function AgentHomeScreen() {
                 )}
 
                 {/* Skills */}
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Skills</Text>
-                    <View style={styles.skills}>
-                        {agent.skills.map((skill: string) => (
-                            <View key={skill} style={styles.skillChip}>
-                                <Text style={styles.skillChipText}>{skill}</Text>
-                            </View>
-                        ))}
-                    </View>
-                </View>
+                 <View style={styles.section}>
+                     <Text style={styles.sectionTitle}>Skills</Text>
+                     <View style={styles.skills}>
+                         {agent.skills?.map((skill: string) => (
+                             <View key={skill} style={styles.skillChip}>
+                                 <Text style={styles.skillChipText}>{skill}</Text>
+                             </View>
+                         )) || (
+                             <Text style={{ color: '#8E8E93', textAlign: 'center', padding: 16 }}>
+                                 No skills added
+                             </Text>
+                         )}
+                     </View>
+                 </View>
 
                 {/* Recent Actions */}
                 {actions && actions.length > 0 && (

@@ -1,62 +1,25 @@
-"use node"
+"use node";
 
 /**
- * Unified Container Management Router
+ * Container Router (Simplified for MVP)
  * 
- * Routes container operations to:
- * - Docker Engine (development)
- * - Fly.io Machines (production)
- * 
- * Environment controlled by NODE_ENV:
- * - "development" or undefined → Docker
- * - "production" → Fly.io
- * 
- * USAGE:
- * Instead of calling internal.docker or internal.fly directly,
- * use the getContainerApi() helper to get the correct API reference.
+ * Uses Docker Engine for local development.
+ * Can switch to Fly.io later by adding FLY_API_TOKEN env var.
  */
 
 import { internal } from "./_generated/api";
 
-// Environment detection
 const FLY_API_TOKEN = process.env.FLY_API_TOKEN;
-const USE_DOCKER = process.env.NODE_ENV !== "production" || !FLY_API_TOKEN;
+const USE_DOCKER = !FLY_API_TOKEN;
 
 /**
- * Log which backend is active
- */
-if (typeof console !== "undefined") {
-  console.log(`📦 Container backend: ${USE_DOCKER ? "Docker Engine (dev)" : "Fly.io (prod)"}`);
-}
-
-/**
- * Get the correct container API based on environment
- * 
- * @returns The internal API namespace for Docker or Fly
- * 
- * @example
- * const containerApi = getContainerApi();
- * await ctx.scheduler.runAfter(0, containerApi.createContainer, { ... });
+ * Get container API
  */
 export function getContainerApi() {
-  return USE_DOCKER ? internal.docker : internal.fly;
+  return USE_DOCKER ? internal.docker : internal.docker; // Always use docker for now
 }
 
 /**
- * Get container reference field name based on environment
- * - Docker: containerId
- * - Fly: flyMachineId
- */
-export function getContainerIdField(): "containerId" | "flyMachineId" {
-  return USE_DOCKER ? "containerId" : "flyMachineId";
-}
-
-/**
- * Export backend type for logging/debugging
+ * Export backend type
  */
 export const BACKEND_TYPE = USE_DOCKER ? "docker" : "fly";
-
-/**
- * Export environment flag
- */
-export const USE_DOCKER_BACKEND = USE_DOCKER;

@@ -4,19 +4,21 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
-import { useAgent, useChatHistory, useSendMessage } from '@/lib/hooks';
+import { useAgent, useChatHistory, useSendMessage, Message } from '@/lib/hooks';
 import { sessionsDb } from '@/lib/db';
+import { Id } from '@/convex/_generated/dataModel';
 
 export default function AgentChatTab() {
-    const { id: agentId } = useLocalSearchParams<{ id: string }>();
+    const { id: agentIdStr } = useLocalSearchParams<{ id: string }>();
+    const agentId = agentIdStr ? (agentIdStr as Id<"agents">) : null;
     const [inputText, setInputText] = useState('');
-    const [sessionId, setSessionId] = useState<string | null>(null);
+    const [sessionId, setSessionId] = useState<string | undefined>(undefined);
     const [isTyping, setIsTyping] = useState(false);
     const scrollViewRef = useRef<ScrollView>(null);
 
     // Convex hooks
-    const agent = useAgent(agentId as any);
-    const messages = useChatHistory(agentId as any, sessionId || undefined);
+    const agent = useAgent(agentId);
+    const messages = useChatHistory(agentId, sessionId);
     const sendMessage = useSendMessage();
 
     useEffect(() => {
@@ -78,37 +80,37 @@ export default function AgentChatTab() {
 
     return (
         <SafeAreaView style={styles.container} edges={[]}>
-            {/* Messages */}
-            <KeyboardAvoidingView
-                style={styles.content}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-            >
-                <ScrollView
-                    ref={scrollViewRef}
-                    style={styles.messages}
-                    contentContainerStyle={styles.messagesContent}
-                    onContentSizeChange={scrollToBottom}
-                    showsVerticalScrollIndicator={false}
-                >
-                    {messages && messages.length === 0 && (
-                        <View style={styles.empty}>
-                            <Text style={styles.emptyIcon}>💬</Text>
-                            <Text style={styles.emptyText}>
-                                Start a conversation with {agent.name}
-                            </Text>
-                        </View>
-                    )}
+{/* Messages */}
+             <KeyboardAvoidingView
+                 style={styles.content}
+                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                 keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+             >
+                 <ScrollView
+                     ref={scrollViewRef}
+                     style={styles.messages}
+                     contentContainerStyle={styles.messagesContent}
+                     onContentSizeChange={scrollToBottom}
+                     showsVerticalScrollIndicator={false}
+                 >
+                     {messages && messages.length === 0 && (
+                         <View style={styles.empty}>
+                             <Text style={styles.emptyIcon}>💬</Text>
+                             <Text style={styles.emptyText}>
+                                 Start a conversation with {agent?.name}
+                             </Text>
+                         </View>
+                     )}
 
-                    {messages && messages.map((message) => (
-                        <MessageBubble key={message._id} message={message} />
-                    ))}
+                     {messages && messages.map((message: Message) => (
+                         <MessageBubble key={message._id} message={message} />
+                     ))}
 
-                    {isTyping && (
-                        <View style={styles.typingIndicator}>
-                            <Text style={styles.typingText}>●●●</Text>
-                        </View>
-                    )}
+                     {isTyping && (
+                         <View style={styles.typingIndicator}>
+                             <Text style={styles.typingText}>●●●</Text>
+                         </View>
+                     )}
                 </ScrollView>
 
                 {/* Input */}
