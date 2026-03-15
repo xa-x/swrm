@@ -20,12 +20,12 @@ export const send = mutation({
       throw new Error("Agent not running");
     }
 
-    if (!agent.containerUrl) {
-      throw new Error("No container URL");
+    if (!agent.containerId) {
+      throw new Error("No machine");
     }
 
-    const response = await ctx.scheduler.runAfter(0, internal.docker.callAgent, {
-      containerUrl: agent.containerUrl,
+    const response = await ctx.scheduler.runAfter(0, internal.fly.callAgent, {
+      machineId: agent.containerId,
       message: content,
       pairingToken: agent.pairingToken,
     });

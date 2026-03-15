@@ -67,12 +67,11 @@ export const create = mutation({
       updatedAt: now,
     });
 
-    await ctx.scheduler.runAfter(0, internal.docker.createContainer, {
+    // Spawn Fly Machine
+    await ctx.scheduler.runAfter(0, internal.fly.createMachine, {
       agentId,
-      userId,
-      name: args.name,
-      provider: args.useSwrmCredits ? "zai" : args.provider,
       apiKey: args.apiKey || process.env.Z_AI_API_KEY || "",
+      provider: args.useSwrmCredits ? "zai" : args.provider,
       model: args.model,
       systemPrompt: args.systemPrompt,
     });
@@ -121,9 +120,8 @@ export const remove = mutation({
     }
 
     if (agent.containerId) {
-      await ctx.scheduler.runAfter(0, internal.docker.removeContainer, {
-        containerId: agent.containerId,
-        agentId,
+      await ctx.scheduler.runAfter(0, internal.fly.deleteMachine, {
+        machineId: agent.containerId,
       });
     }
 
@@ -143,12 +141,13 @@ export const start = mutation({
       throw new Error("Agent not found");
     }
 
-    if (!agent.containerId) throw new Error("No container");
+    if (!agent.containerId) throw new Error("No machine");
 
-    await ctx.scheduler.runAfter(0, internal.docker.startContainer, {
-      containerId: agent.containerId,
-      agentId,
+    await ctx.scheduler.runAfter(0, internal.fly.startMachine, {
+      machineId: agent.containerId,
     });
+
+    await ctx.db.patch(agentId, { status: "running", updatedAt: Date.now() });
 
     return { success: true };
   },
@@ -165,12 +164,13 @@ export const stop = mutation({
       throw new Error("Agent not found");
     }
 
-    if (!agent.containerId) throw new Error("No container");
+    if (!agent.containerId) throw new Error("No machine");
 
-    await ctx.scheduler.runAfter(0, internal.docker.stopContainer, {
-      containerId: agent.containerId,
-      agentId,
+    await ctx.scheduler.runAfter(0, internal.fly.stopMachine, {
+      machineId: agent.containerId,
     });
+
+    await ctx.db.patch(agentId, { status: "stopped", updatedAt: Date.now() });
 
     return { success: true };
   },
