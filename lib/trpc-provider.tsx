@@ -3,8 +3,13 @@ import superjson from 'superjson'
 import { trpc } from './trpc';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
+import { Platform } from 'react-native';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+// Web uses relative URLs (same origin), native uses absolute URL to server
+const API_URL = Platform.select({
+  web: '/api/trpc',
+  default: process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/trpc',
+});
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -19,9 +24,9 @@ const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
       transformer: superjson,
-      url: `${API_URL}/trpc`,
+      url: API_URL,
       async headers() {
-        // Add Clerk token when available
+        // TODO: Add Clerk token
         // const token = await getToken();
         // return token ? { Authorization: `Bearer ${token}` } : {};
         return {};
