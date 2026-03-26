@@ -1,16 +1,9 @@
-/**
- * Agent Chat Screen
- * 
- * Privacy-first: No message storage
- */
-
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { useQuery, useMutation } from 'convex/react';
-import { api } from '@/convex/_generated/api';
+import { trpc } from '../../../lib/trpc';
 
 interface Message {
   id: string;
@@ -24,17 +17,17 @@ export default function AgentChatScreen() {
   const insets = useSafeAreaInsets();
   
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
+  const [inputText,
+ setInputText] = useState('');
+  const [isTyping,
+ setIsTyping] = useState(false);
   
   const scrollViewRef = useRef<ScrollView>(null);
 
-  const agent = useQuery(
-    api.agents.get,
-    agentId ? { agentId: agentId as any } : 'skip'
+  const { data: agent } = trpc.agents.byId.useQuery(
+    { id: agentId! },
+    { enabled: !!agentId }
   );
-
-  const sendMessage = useMutation(api.chat.send);
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {
@@ -63,16 +56,15 @@ export default function AgentChatScreen() {
     setIsTyping(true);
 
     try {
-      const response = await sendMessage({
-        agentId: agentId as any,
-        content: text,
-      });
-
+      // TODO: Call agent API endpoint
+      // For now, simulate response
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
       // Add assistant message
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: response.response,
+        content: 'This is a placeholder response. Connect your agent API to send messages.',
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, assistantMessage]);
